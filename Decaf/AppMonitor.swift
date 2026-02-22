@@ -18,6 +18,15 @@ struct RunningApp: Identifiable, Equatable {
     static func == (lhs: RunningApp, rhs: RunningApp) -> Bool {
         lhs.id == rhs.id && lhs.name == rhs.name && lhs.isRunning == rhs.isRunning
     }
+
+    nonisolated static func alphabetical(_ lhs: RunningApp, _ rhs: RunningApp) -> Bool {
+        lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+    }
+
+    nonisolated static func runningFirst(_ lhs: RunningApp, _ rhs: RunningApp) -> Bool {
+        if lhs.isRunning != rhs.isRunning { return lhs.isRunning }
+        return alphabetical(lhs, rhs)
+    }
 }
 
 struct EnabledApp: Codable {
@@ -41,6 +50,7 @@ final class AppMonitor {
 
     var keepDisplayOn: Bool {
         didSet {
+            guard !isInitializing else { return }
             defaults.set(keepDisplayOn, forKey: Self.keepDisplayOnKey)
             if isCaffeinateRunning {
                 stopCaffeinate()
@@ -53,12 +63,14 @@ final class AppMonitor {
 
     private(set) var excludedApps: Set<String> = ["com.apple.finder"] {
         didSet {
+            guard !isInitializing else { return }
             defaults.set(Array(excludedApps), forKey: Self.excludedAppsKey)
         }
     }
 
     private var caffeinateProcess: Process?
     private var pollTimer: Timer?
+    private var isInitializing = true
     private let defaults = UserDefaults.standard
     private static let defaultsKey = "enabledApps"
     private static let keepDisplayOnKey = "keepDisplayOn"
@@ -84,13 +96,12 @@ final class AppMonitor {
            let decoded = try? JSONDecoder().decode([String: EnabledApp].self, from: data) {
             excludedAppInfo = decoded
         }
-        refreshRunningApps()
-        refreshSettingsApps()
+        isInitializing = false
+        refreshAll()
         updateCaffeinate()
 
         pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.refreshRunningApps()
-            self?.refreshSettingsApps()
+            self?.refreshAll()
             self?.updateCaffeinate()
         }
     }
@@ -112,7 +123,7 @@ final class AppMonitor {
             enabledApps.removeValue(forKey: bundleID)
         }
         persist()
-        refreshRunningApps()
+        refreshAll()
         updateCaffeinate()
     }
 
@@ -127,29 +138,19 @@ final class AppMonitor {
         if excluded, let idx = visibleApps.firstIndex(where: { $0.id == bundleID }) {
             let app = visibleApps.remove(at: idx)
             hiddenApps.append(app)
-            hiddenApps.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            hiddenApps.sort(by: RunningApp.alphabetical)
             apps.removeAll { $0.id == bundleID }
             excludedApps.insert(bundleID)
             updateCaffeinate()
-            // Persist icon data in the background — PNG encoding is expensive
-            DispatchQueue.global(qos: .utility).async { [weak self] in
-                let iconData = app.icon.pngData
-                let info = EnabledApp(id: bundleID, name: app.name, iconData: iconData)
-                DispatchQueue.main.async {
-                    self?.excludedAppInfo[bundleID] = info
-                    self?.persistExcludedInfo()
-                }
-            }
+            excludedAppInfo[bundleID] = EnabledApp(id: bundleID, name: app.name, iconData: app.icon.pngData)
+            persistExcludedInfo()
         } else if !excluded, let idx = hiddenApps.firstIndex(where: { $0.id == bundleID }) {
             let app = hiddenApps.remove(at: idx)
             visibleApps.append(app)
-            visibleApps.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            visibleApps.sort(by: RunningApp.alphabetical)
             if app.isRunning {
                 apps.append(app)
-                apps.sort {
-                    if $0.isRunning != $1.isRunning { return $0.isRunning }
-                    return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-                }
+                apps.sort(by: RunningApp.runningFirst)
             }
             excludedApps.remove(bundleID)
             excludedAppInfo.removeValue(forKey: bundleID)
@@ -160,8 +161,14 @@ final class AppMonitor {
 
     // MARK: - App List
 
-    private func refreshRunningApps() {
-        let running = NSWorkspace.shared.runningApplications
+    private func refreshAll() {
+        let snapshot = NSWorkspace.shared.runningApplications
+        refreshRunningApps(from: snapshot)
+        refreshSettingsApps(from: snapshot)
+    }
+
+    private func refreshRunningApps(from allApps: [NSRunningApplication]) {
+        let running = allApps
             .filter { $0.activationPolicy == .regular && !excludedApps.contains($0.bundleIdentifier ?? "") }
 
         // Build merged list: running apps + toggled-but-quit apps
@@ -190,23 +197,20 @@ final class AppMonitor {
             ))
         }
 
-        // Sort: running first, then alphabetically
-        merged.sort {
-            if $0.isRunning != $1.isRunning { return $0.isRunning }
-            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-        }
+        merged.sort(by: RunningApp.runningFirst)
 
         if merged != apps {
             apps = merged
         }
     }
 
-    private func refreshSettingsApps() {
-        let allRunning = NSWorkspace.shared.runningApplications
+    private func refreshSettingsApps(from allApps: [NSRunningApplication]) {
+        let allRunning = allApps
             .filter { $0.activationPolicy == .regular }
 
         var visible: [RunningApp] = []
         var hidden: [RunningApp] = []
+        var seenVisible = Set<String>()
         var seenHidden = Set<String>()
 
         for app in allRunning {
@@ -218,10 +222,13 @@ final class AppMonitor {
                 isRunning: true
             )
             if excludedApps.contains(id) {
+                guard !seenHidden.contains(id) else { continue }
                 hidden.append(entry)
                 seenHidden.insert(id)
             } else {
+                guard !seenVisible.contains(id) else { continue }
                 visible.append(entry)
+                seenVisible.insert(id)
             }
         }
 
@@ -230,8 +237,8 @@ final class AppMonitor {
             hidden.append(RunningApp(id: id, name: info.name, icon: info.icon, isRunning: false))
         }
 
-        visible.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        hidden.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        visible.sort(by: RunningApp.alphabetical)
+        hidden.sort(by: RunningApp.alphabetical)
 
         if visible != visibleApps { visibleApps = visible }
         if hidden != hiddenApps { hiddenApps = hidden }
@@ -284,6 +291,7 @@ final class AppMonitor {
 
     private func stopCaffeinate() {
         guard let process = caffeinateProcess, process.isRunning else { return }
+        process.terminationHandler = nil
         process.terminate()
         caffeinateProcess = nil
         #if DEBUG
