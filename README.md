@@ -13,11 +13,9 @@ Pick which apps should keep your Mac awake — when any of them is running, slee
 - **Launch at Login** — start automatically with your Mac
 - **Zero orphans** — the underlying `caffeinate` process is tied to Decaf's PID, so it cleans up automatically even if Decaf crashes or is force-quit
 
-## Install
+## Binary install
 
-Download the latest `Decaf.zip` from [Releases](https://github.com/0x0L/Decaf/releases), unzip it, and drag `Decaf.app` to your Applications folder.
-
-On first launch, macOS will block the app because it isn't notarized. To allow it:
+Download the latest `Decaf.zip` from the [Releases](https://github.com/0x0L/Decaf/releases) page. On first launch, macOS will block the app because it isn't notarized. To allow it on macOS Tahoe:
 
 1. Try to open Decaf — the system will show a warning
 2. Go to **System Settings → Privacy & Security**
