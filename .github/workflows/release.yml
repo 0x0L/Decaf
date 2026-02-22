@@ -25,9 +25,10 @@ jobs:
             -archivePath build/Decaf.xcarchive \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Export app and create zip
+      - name: Export app, sign, and create zip
         run: |
           cp -R build/Decaf.xcarchive/Products/Applications/Decaf.app build/Decaf.app
+          codesign --sign - --force --deep build/Decaf.app
           cd build
           ditto -c -k --keepParent Decaf.app Decaf.zip
 
