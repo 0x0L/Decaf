@@ -8,14 +8,14 @@ Unlike a simple caffeinate toggle, Decaf lets you pick which running apps should
 
 1. Open `Decaf.xcodeproj` in Xcode
 2. Build and run (Cmd+R)
-3. Decaf appears in the menu bar as a coffee cup icon
+3. Decaf appears in the menu bar as a mug icon
 
 ## Usage
 
 - Click the menu bar icon to see running apps
 - Toggle any app to keep your Mac awake while it runs
 - Apps that quit but are still toggled appear in a separate "Not Running" section
-- Filled cup = caffeinate active, outlined cup = idle
+- Filled mug = caffeinate active, outlined mug = idle
 
 ## Requirements
 
