@@ -1,8 +1,17 @@
 # Decaf
 
-A macOS menu bar utility that keeps your Mac awake while specific apps are running.
+A macOS menu bar app that prevents sleep while specific apps are running.
 
-Unlike a simple caffeinate toggle, Decaf lets you pick which running apps should prevent sleep. If any toggled app is running, your Mac stays awake. When the last one quits, sleep is allowed again. Selections persist across restarts — including app names and icons, so toggled apps that aren't currently running still show up with their proper appearance.
+Pick which apps should keep your Mac awake — when any of them is running, sleep is blocked. When the last one quits, normal sleep resumes. Your selections are remembered across restarts.
+
+## Features
+
+- **Per-app control** — toggle sleep prevention for individual apps, not a blanket "stay awake" switch
+- **Persistent selections** — toggled apps remain in the list even after they quit, ready for next launch
+- **Keep Display On** — optionally prevent the display from sleeping too
+- **Hide apps** — declutter the menu by hiding apps you'll never need (e.g. Finder)
+- **Launch at Login** — start automatically with your Mac
+- **Zero orphans** — the underlying `caffeinate` process is tied to Decaf's PID, so it cleans up automatically even if Decaf crashes or is force-quit
 
 ## Install
 
@@ -12,10 +21,9 @@ Unlike a simple caffeinate toggle, Decaf lets you pick which running apps should
 
 ## Usage
 
-- Click the menu bar icon to see running apps
-- Toggle any app to keep your Mac awake while it runs
-- Apps that quit but are still toggled appear in a separate "Not Running" section
-- Filled mug = caffeinate active, outlined mug = idle
+Click the mug icon to see your running apps. Toggle any app on to prevent sleep while it runs. A filled mug means sleep is blocked; an outlined mug means idle.
+
+Open Settings to hide apps from the menu, toggle "Keep Display On", or enable Launch at Login.
 
 ## Requirements
 
