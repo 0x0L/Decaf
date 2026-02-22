@@ -8,10 +8,20 @@ struct RunningApp: Identifiable {
     var isRunning: Bool
 }
 
+struct EnabledApp: Codable {
+    let id: String
+    let name: String
+    let iconData: Data
+
+    var icon: NSImage {
+        NSImage(data: iconData) ?? NSImage()
+    }
+}
+
 @Observable
 final class AppMonitor {
     private(set) var apps: [RunningApp] = []
-    private(set) var enabledBundleIDs: Set<String> = []
+    private(set) var enabledApps: [String: EnabledApp] = [:]
 
     var isCaffeinateRunning: Bool {
         caffeinateProcess?.isRunning == true
@@ -20,37 +30,28 @@ final class AppMonitor {
     // MARK: - Private
 
     private var caffeinateProcess: Process?
+    private var pollTimer: Timer?
     private let defaults = UserDefaults.standard
-    private static let defaultsKey = "enabledBundleIDs"
+    private static let defaultsKey = "enabledApps"
 
     // MARK: - Init
 
     init() {
-        enabledBundleIDs = Set(
-            defaults.stringArray(forKey: Self.defaultsKey) ?? []
-        )
+        if let data = defaults.data(forKey: Self.defaultsKey),
+           let decoded = try? JSONDecoder().decode([String: EnabledApp].self, from: data) {
+            enabledApps = decoded
+        }
         refreshRunningApps()
         updateCaffeinate()
 
-        let center = NSWorkspace.shared.notificationCenter
-        center.addObserver(
-            self,
-            selector: #selector(appLaunched(_:)),
-            name: NSWorkspace.didLaunchApplicationNotification,
-            object: nil
-        )
-        center.addObserver(
-            self,
-            selector: #selector(appTerminated(_:)),
-            name: NSWorkspace.didTerminateApplicationNotification,
-            object: nil
-        )
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+            self?.refreshRunningApps()
+            self?.updateCaffeinate()
+        }
     }
 
     deinit {
-        let center = NSWorkspace.shared.notificationCenter
-        center.removeObserver(self, name: NSWorkspace.didLaunchApplicationNotification, object: nil)
-        center.removeObserver(self, name: NSWorkspace.didTerminateApplicationNotification, object: nil)
+        pollTimer?.invalidate()
         stopCaffeinate()
     }
 
@@ -58,9 +59,12 @@ final class AppMonitor {
 
     func setEnabled(_ bundleID: String, _ enabled: Bool) {
         if enabled {
-            enabledBundleIDs.insert(bundleID)
+            if let app = apps.first(where: { $0.id == bundleID }) {
+                let iconData = app.icon.tiffRepresentation ?? Data()
+                enabledApps[bundleID] = EnabledApp(id: bundleID, name: app.name, iconData: iconData)
+            }
         } else {
-            enabledBundleIDs.remove(bundleID)
+            enabledApps.removeValue(forKey: bundleID)
         }
         persist()
         refreshRunningApps()
@@ -68,23 +72,7 @@ final class AppMonitor {
     }
 
     func isEnabled(_ bundleID: String) -> Bool {
-        enabledBundleIDs.contains(bundleID)
-    }
-
-    // MARK: - Workspace Notifications
-
-    @objc private func appLaunched(_: Notification) {
-        DispatchQueue.main.async { [weak self] in
-            self?.refreshRunningApps()
-            self?.updateCaffeinate()
-        }
-    }
-
-    @objc private func appTerminated(_: Notification) {
-        DispatchQueue.main.async { [weak self] in
-            self?.refreshRunningApps()
-            self?.updateCaffeinate()
-        }
+        enabledApps[bundleID] != nil
     }
 
     // MARK: - App List
@@ -110,12 +98,11 @@ final class AppMonitor {
         }
 
         // Toggled-but-quit apps
-        for id in enabledBundleIDs where !seen.contains(id) {
-            let previous = apps.first { $0.id == id }
+        for (id, stored) in enabledApps where !seen.contains(id) {
             merged.append(RunningApp(
                 id: id,
-                name: previous?.name ?? id,
-                icon: previous?.icon ?? NSImage(),
+                name: stored.name,
+                icon: stored.icon,
                 isRunning: false
             ))
         }
@@ -132,7 +119,7 @@ final class AppMonitor {
     // MARK: - Caffeinate
 
     private func updateCaffeinate() {
-        let shouldRun = apps.contains { $0.isRunning && enabledBundleIDs.contains($0.id) }
+        let shouldRun = apps.contains { $0.isRunning && enabledApps[$0.id] != nil }
 
         if shouldRun, !isCaffeinateRunning {
             startCaffeinate()
@@ -180,6 +167,8 @@ final class AppMonitor {
     // MARK: - Persistence
 
     private func persist() {
-        defaults.set(Array(enabledBundleIDs), forKey: Self.defaultsKey)
+        if let data = try? JSONEncoder().encode(enabledApps) {
+            defaults.set(data, forKey: Self.defaultsKey)
+        }
     }
 }
