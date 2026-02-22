@@ -1,7 +1,9 @@
+import ServiceManagement
 import SwiftUI
 
 struct ContentView: View {
     @Environment(AppMonitor.self) private var monitor
+    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     private var runningApps: [RunningApp] {
         monitor.apps.filter(\.isRunning)
@@ -29,6 +31,19 @@ struct ContentView: View {
         }
 
         Divider()
+
+        Toggle("Launch at Login", isOn: $launchAtLogin)
+            .onChange(of: launchAtLogin) { _, newValue in
+                do {
+                    if newValue {
+                        try SMAppService.mainApp.register()
+                    } else {
+                        try SMAppService.mainApp.unregister()
+                    }
+                } catch {
+                    launchAtLogin = SMAppService.mainApp.status == .enabled
+                }
+            }
 
         Button("Quit Decaf") {
             NSApp.terminate(nil)

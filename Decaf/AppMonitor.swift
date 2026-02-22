@@ -1,11 +1,15 @@
 import AppKit
 import Observation
 
-struct RunningApp: Identifiable {
+struct RunningApp: Identifiable, Equatable {
     let id: String // bundleIdentifier
     let name: String
     let icon: NSImage
     var isRunning: Bool
+
+    static func == (lhs: RunningApp, rhs: RunningApp) -> Bool {
+        lhs.id == rhs.id && lhs.name == rhs.name && lhs.isRunning == rhs.isRunning
+    }
 }
 
 struct EnabledApp: Codable {
@@ -44,7 +48,7 @@ final class AppMonitor {
         refreshRunningApps()
         updateCaffeinate()
 
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refreshRunningApps()
             self?.updateCaffeinate()
         }
@@ -113,7 +117,9 @@ final class AppMonitor {
             return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
 
-        apps = merged
+        if merged != apps {
+            apps = merged
+        }
     }
 
     // MARK: - Caffeinate
