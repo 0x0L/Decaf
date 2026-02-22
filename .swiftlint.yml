@@ -1,0 +1,6 @@
+included:
+  - Decaf
+
+excluded:
+  - DecafTests
+  - DecafUITests

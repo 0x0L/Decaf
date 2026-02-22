@@ -2,7 +2,7 @@ import AppKit
 import Observation
 
 struct RunningApp: Identifiable {
-    let id: String          // bundleIdentifier
+    let id: String // bundleIdentifier
     let name: String
     let icon: NSImage
     var isRunning: Bool
@@ -10,7 +10,6 @@ struct RunningApp: Identifiable {
 
 @Observable
 final class AppMonitor {
-
     private(set) var apps: [RunningApp] = []
     private(set) var enabledBundleIDs: Set<String> = []
 
@@ -74,14 +73,14 @@ final class AppMonitor {
 
     // MARK: - Workspace Notifications
 
-    @objc private func appLaunched(_ note: Notification) {
+    @objc private func appLaunched(_: Notification) {
         DispatchQueue.main.async { [weak self] in
             self?.refreshRunningApps()
             self?.updateCaffeinate()
         }
     }
 
-    @objc private func appTerminated(_ note: Notification) {
+    @objc private func appTerminated(_: Notification) {
         DispatchQueue.main.async { [weak self] in
             self?.refreshRunningApps()
             self?.updateCaffeinate()
@@ -135,9 +134,9 @@ final class AppMonitor {
     private func updateCaffeinate() {
         let shouldRun = apps.contains { $0.isRunning && enabledBundleIDs.contains($0.id) }
 
-        if shouldRun && !isCaffeinateRunning {
+        if shouldRun, !isCaffeinateRunning {
             startCaffeinate()
-        } else if !shouldRun && isCaffeinateRunning {
+        } else if !shouldRun, isCaffeinateRunning {
             stopCaffeinate()
         }
     }
@@ -158,14 +157,14 @@ final class AppMonitor {
         do {
             try process.run()
             caffeinateProcess = process
-#if DEBUG
-            print("caffeinate started")
-#endif
+            #if DEBUG
+                print("caffeinate started")
+            #endif
         } catch {
             caffeinateProcess = nil
-#if DEBUG
-            print("Failed to start caffeinate: \(error)")
-#endif
+            #if DEBUG
+                print("Failed to start caffeinate: \(error)")
+            #endif
         }
     }
 
@@ -173,9 +172,9 @@ final class AppMonitor {
         guard let process = caffeinateProcess, process.isRunning else { return }
         process.terminate()
         caffeinateProcess = nil
-#if DEBUG
-        print("caffeinate stopped")
-#endif
+        #if DEBUG
+            print("caffeinate stopped")
+        #endif
     }
 
     // MARK: - Persistence
