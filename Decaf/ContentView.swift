@@ -14,6 +14,11 @@ struct ContentView: View {
     }
 
     var body: some View {
+        if runningApps.isEmpty && watchedApps.isEmpty {
+            Text("No apps running")
+                .foregroundStyle(.secondary)
+        }
+
         ForEach(runningApps) { app in
             appToggle(app)
         }
@@ -32,6 +37,11 @@ struct ContentView: View {
 
         Divider()
 
+        Toggle("Keep Display On", isOn: Binding(
+            get: { monitor.keepDisplayOn },
+            set: { monitor.keepDisplayOn = $0 }
+        ))
+
         Toggle("Launch at Login", isOn: $launchAtLogin)
             .onChange(of: launchAtLogin) { _, newValue in
                 do {
@@ -45,8 +55,15 @@ struct ContentView: View {
                 }
             }
 
-        Button("Quit Decaf") {
+        Divider()
+
+        Button {
             NSApp.terminate(nil)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "power")
+                Text("Quit Decaf")
+            }
         }
     }
 

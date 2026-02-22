@@ -1,6 +1,14 @@
 import AppKit
 import Observation
 
+extension NSImage {
+    var pngData: Data {
+        guard let tiff = tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff) else { return Data() }
+        return rep.representation(using: .png, properties: [:]) ?? Data()
+    }
+}
+
 struct RunningApp: Identifiable, Equatable {
     let id: String // bundleIdentifier
     let name: String
@@ -31,16 +39,28 @@ final class AppMonitor {
         caffeinateProcess?.isRunning == true
     }
 
+    var keepDisplayOn: Bool {
+        didSet {
+            defaults.set(keepDisplayOn, forKey: Self.keepDisplayOnKey)
+            if isCaffeinateRunning {
+                stopCaffeinate()
+                updateCaffeinate()
+            }
+        }
+    }
+
     // MARK: - Private
 
     private var caffeinateProcess: Process?
     private var pollTimer: Timer?
     private let defaults = UserDefaults.standard
     private static let defaultsKey = "enabledApps"
+    private static let keepDisplayOnKey = "keepDisplayOn"
 
     // MARK: - Init
 
     init() {
+        keepDisplayOn = defaults.bool(forKey: Self.keepDisplayOnKey)
         if let data = defaults.data(forKey: Self.defaultsKey),
            let decoded = try? JSONDecoder().decode([String: EnabledApp].self, from: data) {
             enabledApps = decoded
@@ -64,7 +84,7 @@ final class AppMonitor {
     func setEnabled(_ bundleID: String, _ enabled: Bool) {
         if enabled {
             if let app = apps.first(where: { $0.id == bundleID }) {
-                let iconData = app.icon.tiffRepresentation ?? Data()
+                let iconData = app.icon.pngData
                 enabledApps[bundleID] = EnabledApp(id: bundleID, name: app.name, iconData: iconData)
             }
         } else {
@@ -137,7 +157,7 @@ final class AppMonitor {
     private func startCaffeinate() {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
-        process.arguments = ["-i"]
+        process.arguments = keepDisplayOn ? ["-di"] : ["-i"]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
 
