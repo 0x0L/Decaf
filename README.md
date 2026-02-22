@@ -15,9 +15,16 @@ Pick which apps should keep your Mac awake — when any of them is running, slee
 
 ## Install
 
-1. Open `Decaf.xcodeproj` in Xcode
-2. Build and run (Cmd+R)
-3. Decaf appears in the menu bar as a mug icon
+Download the latest `Decaf.zip` from [Releases](https://github.com/0x0L/Decaf/releases), unzip it, and drag `Decaf.app` to your Applications folder.
+
+On first launch, macOS will block the app because it isn't notarized. To allow it:
+
+1. Try to open Decaf — the system will show a warning
+2. Go to **System Settings → Privacy & Security**
+3. Scroll down and click **Open Anyway** next to the Decaf message
+4. Confirm by clicking **Open Anyway** in the dialog that appears
+
+You only need to do this once.
 
 ## Usage
 
@@ -28,7 +35,6 @@ Open Settings to hide apps from the menu, toggle "Keep Display On", or enable La
 ## Requirements
 
 - macOS 15+
-- Xcode 16+
 
 ## License
 
