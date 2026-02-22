@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build archive
+        run: |
+          xcodebuild archive \
+            -project Decaf.xcodeproj \
+            -scheme Decaf \
+            -configuration Release \
+            -archivePath build/Decaf.xcarchive \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Export app and create zip
+        run: |
+          cp -R build/Decaf.xcarchive/Products/Applications/Decaf.app build/Decaf.app
+          cd build
+          ditto -c -k --keepParent Decaf.app Decaf.zip
+
+      - name: Get tag message
+        id: tag
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          TAG_MESSAGE=$(git tag -l --format='%(contents)' "$REF_NAME")
+          {
+            echo 'body<<EOF'
+            echo "$TAG_MESSAGE"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.tag.outputs.body }}
+          files: build/Decaf.zip
