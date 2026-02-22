@@ -14,5 +14,10 @@ struct DecafApp: App {
                 : "mug")
                 .contentTransition(.symbolEffect(.replace))
         }
+
+        Settings {
+            SettingsView()
+                .environment(appMonitor)
+        }
     }
 }

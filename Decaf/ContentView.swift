@@ -1,9 +1,7 @@
-import ServiceManagement
 import SwiftUI
 
 struct ContentView: View {
     @Environment(AppMonitor.self) private var monitor
-    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     private var runningApps: [RunningApp] {
         monitor.apps.filter(\.isRunning)
@@ -37,25 +35,12 @@ struct ContentView: View {
 
         Divider()
 
-        Toggle("Keep Display On", isOn: Binding(
-            get: { monitor.keepDisplayOn },
-            set: { monitor.keepDisplayOn = $0 }
-        ))
-
-        Toggle("Launch at Login", isOn: $launchAtLogin)
-            .onChange(of: launchAtLogin) { _, newValue in
-                do {
-                    if newValue {
-                        try SMAppService.mainApp.register()
-                    } else {
-                        try SMAppService.mainApp.unregister()
-                    }
-                } catch {
-                    launchAtLogin = SMAppService.mainApp.status == .enabled
-                }
+        SettingsLink {
+            HStack(spacing: 6) {
+                Image(systemName: "gearshape")
+                Text("Settings...")
             }
-
-        Divider()
+        }
 
         Button {
             NSApp.terminate(nil)
