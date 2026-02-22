@@ -71,6 +71,7 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 340, height: 420)
+        .onAppear { NSApp.activate() }
     }
 
     private func appLabel(_ app: RunningApp) -> some View {

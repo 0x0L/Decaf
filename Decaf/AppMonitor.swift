@@ -1,60 +1,22 @@
 import AppKit
 import Observation
 
-extension NSImage {
-    var pngData: Data {
-        guard let tiff = tiffRepresentation,
-              let rep = NSBitmapImageRep(data: tiff) else { return Data() }
-        return rep.representation(using: .png, properties: [:]) ?? Data()
-    }
-}
-
-struct RunningApp: Identifiable, Equatable {
-    let id: String // bundleIdentifier
-    let name: String
-    let icon: NSImage
-    var isRunning: Bool
-
-    static func == (lhs: RunningApp, rhs: RunningApp) -> Bool {
-        lhs.id == rhs.id && lhs.name == rhs.name && lhs.isRunning == rhs.isRunning
-    }
-
-    nonisolated static func alphabetical(_ lhs: RunningApp, _ rhs: RunningApp) -> Bool {
-        lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-    }
-
-    nonisolated static func runningFirst(_ lhs: RunningApp, _ rhs: RunningApp) -> Bool {
-        if lhs.isRunning != rhs.isRunning { return lhs.isRunning }
-        return alphabetical(lhs, rhs)
-    }
-}
-
-struct EnabledApp: Codable {
-    let id: String
-    let name: String
-    let iconData: Data
-
-    var icon: NSImage {
-        NSImage(data: iconData) ?? NSImage()
-    }
-}
-
 @Observable
 final class AppMonitor {
     private(set) var apps: [RunningApp] = []
     private(set) var enabledApps: [String: EnabledApp] = [:]
+    private(set) var visibleApps: [RunningApp] = []
+    private(set) var hiddenApps: [RunningApp] = []
 
-    var isCaffeinateRunning: Bool {
-        caffeinateProcess?.isRunning == true
-    }
+    private(set) var isCaffeinateRunning = false
 
     var keepDisplayOn: Bool {
         didSet {
             guard !isInitializing else { return }
             defaults.set(keepDisplayOn, forKey: Self.keepDisplayOnKey)
             if isCaffeinateRunning {
-                stopCaffeinate()
-                updateCaffeinate()
+                caffeinateManager.restart(keepDisplayOn: keepDisplayOn)
+                isCaffeinateRunning = caffeinateManager.isRunning
             }
         }
     }
@@ -68,7 +30,7 @@ final class AppMonitor {
         }
     }
 
-    private var caffeinateProcess: Process?
+    private let caffeinateManager = CaffeinateManager()
     private var pollTimer: Timer?
     private var isInitializing = true
     private let defaults = UserDefaults.standard
@@ -98,17 +60,15 @@ final class AppMonitor {
         }
         isInitializing = false
         refreshAll()
-        updateCaffeinate()
 
         pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refreshAll()
-            self?.updateCaffeinate()
         }
     }
 
     deinit {
         pollTimer?.invalidate()
-        stopCaffeinate()
+        caffeinateManager.stop()
     }
 
     // MARK: - Public
@@ -116,187 +76,92 @@ final class AppMonitor {
     func setEnabled(_ bundleID: String, _ enabled: Bool) {
         if enabled {
             if let app = apps.first(where: { $0.id == bundleID }) {
-                let iconData = app.icon.pngData
-                enabledApps[bundleID] = EnabledApp(id: bundleID, name: app.name, iconData: iconData)
+                enabledApps[bundleID] = EnabledApp(id: bundleID, name: app.name, iconData: app.icon.pngData)
             }
         } else {
             enabledApps.removeValue(forKey: bundleID)
         }
-        persist()
         refreshAll()
-        updateCaffeinate()
+        persist()
     }
 
     func isEnabled(_ bundleID: String) -> Bool {
         enabledApps[bundleID] != nil
     }
 
-    private(set) var visibleApps: [RunningApp] = []
-    private(set) var hiddenApps: [RunningApp] = []
-
     func setExcluded(_ bundleID: String, _ excluded: Bool) {
-        if excluded, let idx = visibleApps.firstIndex(where: { $0.id == bundleID }) {
-            let app = visibleApps.remove(at: idx)
-            hiddenApps.append(app)
-            hiddenApps.sort(by: RunningApp.alphabetical)
-            apps.removeAll { $0.id == bundleID }
+        // Capture before refreshAll changes the lists
+        let appForInfo = excluded ? visibleApps.first(where: { $0.id == bundleID }) : nil
+
+        if excluded {
             excludedApps.insert(bundleID)
-            updateCaffeinate()
-            excludedAppInfo[bundleID] = EnabledApp(id: bundleID, name: app.name, iconData: app.icon.pngData)
-            persistExcludedInfo()
-        } else if !excluded, let idx = hiddenApps.firstIndex(where: { $0.id == bundleID }) {
-            let app = hiddenApps.remove(at: idx)
-            visibleApps.append(app)
-            visibleApps.sort(by: RunningApp.alphabetical)
-            if app.isRunning {
-                apps.append(app)
-                apps.sort(by: RunningApp.runningFirst)
-            }
+        } else {
             excludedApps.remove(bundleID)
             excludedAppInfo.removeValue(forKey: bundleID)
-            persistExcludedInfo()
-            updateCaffeinate()
         }
+
+        // Update UI immediately
+        refreshAll()
+
+        // Persist after UI update (PNG encoding + JSON serialization is slow)
+        if let app = appForInfo {
+            excludedAppInfo[bundleID] = EnabledApp(id: bundleID, name: app.name, iconData: app.icon.pngData)
+        }
+        persistExcludedInfo()
     }
 
-    // MARK: - App List
+    // MARK: - Refresh
 
     private func refreshAll() {
         let snapshot = NSWorkspace.shared.runningApplications
-        refreshRunningApps(from: snapshot)
-        refreshSettingsApps(from: snapshot)
-    }
-
-    private func refreshRunningApps(from allApps: [NSRunningApplication]) {
-        let running = allApps
-            .filter { $0.activationPolicy == .regular && !excludedApps.contains($0.bundleIdentifier ?? "") }
-
-        // Build merged list: running apps + toggled-but-quit apps
-        var seen = Set<String>()
-        var merged: [RunningApp] = []
-
-        // Running apps first
-        for app in running {
-            guard let id = app.bundleIdentifier, !seen.contains(id) else { continue }
-            seen.insert(id)
-            merged.append(RunningApp(
-                id: id,
-                name: app.localizedName ?? id,
-                icon: app.icon ?? NSImage(),
-                isRunning: true
-            ))
-        }
-
-        // Toggled-but-quit apps
-        for (id, stored) in enabledApps where !seen.contains(id) {
-            merged.append(RunningApp(
-                id: id,
-                name: stored.name,
-                icon: stored.icon,
-                isRunning: false
-            ))
-        }
-
-        merged.sort(by: RunningApp.runningFirst)
-
-        if merged != apps {
-            apps = merged
-        }
-    }
-
-    private func refreshSettingsApps(from allApps: [NSRunningApplication]) {
-        let allRunning = allApps
             .filter { $0.activationPolicy == .regular }
 
+        var seen = Set<String>()
+        var newApps: [RunningApp] = []
         var visible: [RunningApp] = []
         var hidden: [RunningApp] = []
-        var seenVisible = Set<String>()
-        var seenHidden = Set<String>()
 
-        for app in allRunning {
-            guard let id = app.bundleIdentifier else { continue }
+        for nsApp in snapshot {
+            guard let id = nsApp.bundleIdentifier, !seen.contains(id) else { continue }
+            seen.insert(id)
+
             let entry = RunningApp(
                 id: id,
-                name: app.localizedName ?? id,
-                icon: app.icon ?? NSImage(),
+                name: nsApp.localizedName ?? id,
+                icon: nsApp.icon ?? NSImage(),
                 isRunning: true
             )
+
             if excludedApps.contains(id) {
-                guard !seenHidden.contains(id) else { continue }
                 hidden.append(entry)
-                seenHidden.insert(id)
             } else {
-                guard !seenVisible.contains(id) else { continue }
                 visible.append(entry)
-                seenVisible.insert(id)
+                newApps.append(entry)
             }
         }
 
-        // Show excluded apps that aren't currently running (from persisted info)
-        for (id, info) in excludedAppInfo where !seenHidden.contains(id) && excludedApps.contains(id) {
+        // Toggled-but-quit apps (menu bar list only)
+        for (id, stored) in enabledApps where !seen.contains(id) && !excludedApps.contains(id) {
+            newApps.append(RunningApp(id: id, name: stored.name, icon: stored.icon, isRunning: false))
+        }
+
+        // Excluded apps that aren't currently running (settings list only)
+        for (id, info) in excludedAppInfo where !seen.contains(id) && excludedApps.contains(id) {
             hidden.append(RunningApp(id: id, name: info.name, icon: info.icon, isRunning: false))
         }
 
+        newApps.sort(by: RunningApp.runningFirst)
         visible.sort(by: RunningApp.alphabetical)
         hidden.sort(by: RunningApp.alphabetical)
 
+        if newApps != apps { apps = newApps }
         if visible != visibleApps { visibleApps = visible }
         if hidden != hiddenApps { hiddenApps = hidden }
-    }
 
-    private func persistExcludedInfo() {
-        if let data = try? JSONEncoder().encode(excludedAppInfo) {
-            defaults.set(data, forKey: Self.excludedAppInfoKey)
-        }
-    }
-
-    // MARK: - Caffeinate
-
-    private func updateCaffeinate() {
-        let shouldRun = apps.contains { $0.isRunning && enabledApps[$0.id] != nil }
-
-        if shouldRun, !isCaffeinateRunning {
-            startCaffeinate()
-        } else if !shouldRun, isCaffeinateRunning {
-            stopCaffeinate()
-        }
-    }
-
-    private func startCaffeinate() {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
-        process.arguments = keepDisplayOn ? ["-di"] : ["-i"]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-
-        process.terminationHandler = { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.updateCaffeinate()
-            }
-        }
-
-        do {
-            try process.run()
-            caffeinateProcess = process
-            #if DEBUG
-                print("caffeinate started")
-            #endif
-        } catch {
-            caffeinateProcess = nil
-            #if DEBUG
-                print("Failed to start caffeinate: \(error)")
-            #endif
-        }
-    }
-
-    private func stopCaffeinate() {
-        guard let process = caffeinateProcess, process.isRunning else { return }
-        process.terminationHandler = nil
-        process.terminate()
-        caffeinateProcess = nil
-        #if DEBUG
-            print("caffeinate stopped")
-        #endif
+        // Update caffeinate
+        let shouldRun = newApps.contains { $0.isRunning && enabledApps[$0.id] != nil }
+        caffeinateManager.update(shouldRun: shouldRun, keepDisplayOn: keepDisplayOn)
+        isCaffeinateRunning = caffeinateManager.isRunning
     }
 
     // MARK: - Persistence
@@ -304,6 +169,12 @@ final class AppMonitor {
     private func persist() {
         if let data = try? JSONEncoder().encode(enabledApps) {
             defaults.set(data, forKey: Self.defaultsKey)
+        }
+    }
+
+    private func persistExcludedInfo() {
+        if let data = try? JSONEncoder().encode(excludedAppInfo) {
+            defaults.set(data, forKey: Self.excludedAppInfoKey)
         }
     }
 }

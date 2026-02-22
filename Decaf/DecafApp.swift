@@ -3,7 +3,6 @@ import SwiftUI
 @main
 struct DecafApp: App {
     @State private var appMonitor = AppMonitor()
-
     var body: some Scene {
         MenuBarExtra {
             ContentView()
