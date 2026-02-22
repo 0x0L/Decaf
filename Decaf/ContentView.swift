@@ -24,7 +24,7 @@ struct ContentView: View {
         if !watchedApps.isEmpty {
             Divider()
 
-            Text("Not Running")
+            Text("Not running")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -38,7 +38,7 @@ struct ContentView: View {
         SettingsLink {
             HStack(spacing: 6) {
                 Image(systemName: "gearshape")
-                Text("Settings...")
+                Text("Settings\u{2026}")
             }
         }
 

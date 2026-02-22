@@ -55,7 +55,7 @@ struct SettingsView: View {
                         HStack {
                             appLabel(app)
                             if !app.isRunning {
-                                Text("Not Running")
+                                Text("Not running")
                                     .font(.caption)
                                     .foregroundStyle(.tertiary)
                             }
