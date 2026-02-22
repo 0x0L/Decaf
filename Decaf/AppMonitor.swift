@@ -12,9 +12,7 @@ struct RunningApp: Identifiable {
 final class AppMonitor {
 
     private(set) var apps: [RunningApp] = []
-    var enabledBundleIDs: Set<String> {
-        didSet { persist() }
-    }
+    private(set) var enabledBundleIDs: Set<String> = []
 
     var isCaffeinateRunning: Bool {
         caffeinateProcess?.isRunning == true
@@ -51,18 +49,21 @@ final class AppMonitor {
     }
 
     deinit {
-        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        let center = NSWorkspace.shared.notificationCenter
+        center.removeObserver(self, name: NSWorkspace.didLaunchApplicationNotification, object: nil)
+        center.removeObserver(self, name: NSWorkspace.didTerminateApplicationNotification, object: nil)
         stopCaffeinate()
     }
 
     // MARK: - Public
 
-    func toggle(_ bundleID: String) {
-        if enabledBundleIDs.contains(bundleID) {
-            enabledBundleIDs.remove(bundleID)
-        } else {
+    func setEnabled(_ bundleID: String, _ enabled: Bool) {
+        if enabled {
             enabledBundleIDs.insert(bundleID)
+        } else {
+            enabledBundleIDs.remove(bundleID)
         }
+        persist()
         refreshRunningApps()
         updateCaffeinate()
     }
@@ -74,13 +75,17 @@ final class AppMonitor {
     // MARK: - Workspace Notifications
 
     @objc private func appLaunched(_ note: Notification) {
-        refreshRunningApps()
-        updateCaffeinate()
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshRunningApps()
+            self?.updateCaffeinate()
+        }
     }
 
     @objc private func appTerminated(_ note: Notification) {
-        refreshRunningApps()
-        updateCaffeinate()
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshRunningApps()
+            self?.updateCaffeinate()
+        }
     }
 
     // MARK: - App List
@@ -107,7 +112,6 @@ final class AppMonitor {
 
         // Toggled-but-quit apps
         for id in enabledBundleIDs where !seen.contains(id) {
-            // Try to find name/icon from previous state
             let previous = apps.first { $0.id == id }
             merged.append(RunningApp(
                 id: id,
@@ -142,8 +146,14 @@ final class AppMonitor {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
         process.arguments = ["-i"]
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        process.terminationHandler = { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.updateCaffeinate()
+            }
+        }
 
         do {
             try process.run()

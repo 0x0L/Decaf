@@ -7,7 +7,7 @@ struct ContentView: View {
         ForEach(monitor.apps) { app in
             Toggle(isOn: Binding(
                 get: { monitor.isEnabled(app.id) },
-                set: { _ in monitor.toggle(app.id) }
+                set: { monitor.setEnabled(app.id, $0) }
             )) {
                 HStack(spacing: 6) {
                     Image(nsImage: app.icon)

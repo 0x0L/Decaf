@@ -12,6 +12,7 @@ struct DecafApp: App {
             Image(systemName: appMonitor.isCaffeinateRunning
                   ? "cup.and.saucer.fill"
                   : "cup.and.saucer")
+                .contentTransition(.symbolEffect(.replace))
         }
     }
 }
