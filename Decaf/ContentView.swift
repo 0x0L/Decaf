@@ -57,11 +57,13 @@ struct ContentView: View {
             get: { monitor.isEnabled(app.id) },
             set: { monitor.setEnabled(app.id, $0) }
         )) {
-            HStack(spacing: 6) {
+            Label {
+                Text(app.name)
+            } icon: {
                 Image(nsImage: app.icon)
                     .resizable()
+                    .renderingMode(.original)
                     .frame(width: 16, height: 16)
-                Text(app.name)
             }
         }
     }

@@ -7,6 +7,7 @@ struct DecafApp: App {
         MenuBarExtra {
             ContentView()
                 .environment(appMonitor)
+                .labelStyle(.titleAndIcon)
         } label: {
             Image(systemName: appMonitor.isCaffeinateRunning
                 ? "mug.fill"
