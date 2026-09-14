@@ -6,13 +6,29 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		430E600B3058B2C50045F813 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 433B67AB2E7F1FDC00B2C125 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 433B67B22E7F1FDC00B2C125;
+			remoteInfo = Decaf;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		430E60073058B2C50045F813 /* DecafTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DecafTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		433B67B32E7F1FDC00B2C125 /* Decaf.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Decaf.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F1A2B3C4D5E6F7A8B9C0D1E2 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		F1A2B3C4D5E6F7A8B9C0D1E3 /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		430E60083058B2C50045F813 /* DecafTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = DecafTests;
+			sourceTree = "<group>";
+		};
 		433B67B52E7F1FDC00B2C125 /* Decaf */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Decaf;
@@ -21,6 +37,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		430E60043058B2C50045F813 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		433B67B02E7F1FDC00B2C125 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -37,6 +60,7 @@
 				F1A2B3C4D5E6F7A8B9C0D1E2 /* README.md */,
 				F1A2B3C4D5E6F7A8B9C0D1E3 /* LICENSE */,
 				433B67B52E7F1FDC00B2C125 /* Decaf */,
+				430E60083058B2C50045F813 /* DecafTests */,
 				433B67B42E7F1FDC00B2C125 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -45,6 +69,7 @@
 			isa = PBXGroup;
 			children = (
 				433B67B32E7F1FDC00B2C125 /* Decaf.app */,
+				430E60073058B2C50045F813 /* DecafTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -52,6 +77,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		430E60063058B2C50045F813 /* DecafTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 430E600D3058B2C50045F813 /* Build configuration list for PBXNativeTarget "DecafTests" */;
+			buildPhases = (
+				430E60033058B2C50045F813 /* Sources */,
+				430E60043058B2C50045F813 /* Frameworks */,
+				430E60053058B2C50045F813 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				430E600C3058B2C50045F813 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				430E60083058B2C50045F813 /* DecafTests */,
+			);
+			name = DecafTests;
+			packageProductDependencies = (
+			);
+			productName = DecafTests;
+			productReference = 430E60073058B2C50045F813 /* DecafTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		433B67B22E7F1FDC00B2C125 /* Decaf */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 433B67D42E7F1FDE00B2C125 /* Build configuration list for PBXNativeTarget "Decaf" */;
@@ -82,9 +130,13 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2600;
+				LastSwiftUpdateCheck = 2700;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
+					430E60063058B2C50045F813 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = 433B67B22E7F1FDC00B2C125;
+					};
 					433B67B22E7F1FDC00B2C125 = {
 						CreatedOnToolsVersion = 26.0;
 					};
@@ -105,11 +157,19 @@
 			projectRoot = "";
 			targets = (
 				433B67B22E7F1FDC00B2C125 /* Decaf */,
+				430E60063058B2C50045F813 /* DecafTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		430E60053058B2C50045F813 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		433B67B12E7F1FDC00B2C125 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -142,6 +202,13 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		430E60033058B2C50045F813 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		433B67AF2E7F1FDC00B2C125 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -151,7 +218,67 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		430E600C3058B2C50045F813 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 433B67B22E7F1FDC00B2C125 /* Decaf */;
+			targetProxy = 430E600B3058B2C50045F813 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		430E600E3058B2C50045F813 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.0x0L.Decaf.DecafTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Decaf.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Decaf";
+				XROS_DEPLOYMENT_TARGET = 27.0;
+			};
+			name = Debug;
+		};
+		430E600F3058B2C50045F813 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.0x0L.Decaf.DecafTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Decaf.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Decaf";
+				XROS_DEPLOYMENT_TARGET = 27.0;
+			};
+			name = Release;
+		};
 		433B67D22E7F1FDE00B2C125 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -299,6 +426,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = org.0x0L.Decaf;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -335,6 +463,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = org.0x0L.Decaf;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -351,6 +480,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		430E600D3058B2C50045F813 /* Build configuration list for PBXNativeTarget "DecafTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				430E600E3058B2C50045F813 /* Debug */,
+				430E600F3058B2C50045F813 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		433B67AE2E7F1FDC00B2C125 /* Build configuration list for PBXProject "Decaf" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

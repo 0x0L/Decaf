@@ -1,27 +1,27 @@
 import AppKit
 import Observation
+import OSLog
 
+@MainActor
 @Observable
 final class AppMonitor {
     private(set) var apps: [RunningApp] = []
     private(set) var enabledApps: [String: EnabledApp] = [:]
     private(set) var visibleApps: [RunningApp] = []
     private(set) var hiddenApps: [RunningApp] = []
-
     private(set) var isCaffeinateRunning = false
 
     var keepDisplayOn: Bool {
         didSet {
             guard !isInitializing else { return }
             defaults.set(keepDisplayOn, forKey: Self.keepDisplayOnKey)
-            if isCaffeinateRunning {
+
+            if lastRequestedCaffeinateState == true {
                 caffeinateManager.restart(keepDisplayOn: keepDisplayOn)
                 isCaffeinateRunning = caffeinateManager.isRunning
             }
         }
     }
-
-    // MARK: - Private
 
     private(set) var excludedApps: Set<String> = ["com.apple.finder"] {
         didSet {
@@ -30,26 +30,52 @@ final class AppMonitor {
         }
     }
 
-    private let caffeinateManager = CaffeinateManager()
-    private var pollTimer: Timer?
-    private var isInitializing = true
-    private let defaults = UserDefaults.standard
+    @ObservationIgnored private let workspaceMonitor: any WorkspaceMonitoring
+    @ObservationIgnored private let caffeinateManager: any CaffeinateManaging
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let signposter = OSSignposter(
+        subsystem: Bundle.main.bundleIdentifier ?? "Decaf",
+        category: "AppMonitoring"
+    )
+    @ObservationIgnored private var reconciliationTimer: Timer?
+    @ObservationIgnored private var runningProcessIDs: [String: Set<pid_t>] = [:]
+    @ObservationIgnored private var metadataCache: [String: AppMetadata] = [:]
+    @ObservationIgnored private var excludedAppInfo: [String: EnabledApp] = [:]
+    @ObservationIgnored private var lastRequestedCaffeinateState: Bool?
+    @ObservationIgnored private var isInitializing = true
+
     private static let defaultsKey = "enabledApps"
     private static let keepDisplayOnKey = "keepDisplayOn"
     private static let excludedAppsKey = "excludedApps"
     private static let excludedAppInfoKey = "excludedAppInfo"
     private static let defaultExcludedApps: Set<String> = ["com.apple.finder"]
-    private var excludedAppInfo: [String: EnabledApp] = [:]
 
-    // MARK: - Init
+    convenience init() {
+        self.init(
+            workspaceMonitor: SystemWorkspaceMonitor(),
+            caffeinateManager: CaffeinateManager(),
+            defaults: .standard,
+            reconciliationInterval: 300
+        )
+    }
 
-    init() {
+    init(
+        workspaceMonitor: any WorkspaceMonitoring,
+        caffeinateManager: any CaffeinateManaging,
+        defaults: UserDefaults,
+        reconciliationInterval: TimeInterval
+    ) {
+        self.workspaceMonitor = workspaceMonitor
+        self.caffeinateManager = caffeinateManager
+        self.defaults = defaults
+
         if let stored = defaults.stringArray(forKey: Self.excludedAppsKey) {
             excludedApps = Set(stored)
         } else {
             excludedApps = Self.defaultExcludedApps
         }
         keepDisplayOn = defaults.bool(forKey: Self.keepDisplayOnKey)
+
         if let data = defaults.data(forKey: Self.defaultsKey),
            let decoded = try? JSONDecoder().decode([String: EnabledApp].self, from: data) {
             enabledApps = decoded
@@ -58,31 +84,61 @@ final class AppMonitor {
            let decoded = try? JSONDecoder().decode([String: EnabledApp].self, from: data) {
             excludedAppInfo = decoded
         }
-        isInitializing = false
-        refreshAll()
 
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.refreshAll()
+        for (id, stored) in enabledApps {
+            metadataCache[id] = AppMetadata(name: stored.name, icon: stored.icon)
+        }
+        for (id, stored) in excludedAppInfo where metadataCache[id] == nil {
+            metadataCache[id] = AppMetadata(name: stored.name, icon: stored.icon)
+        }
+
+        isInitializing = false
+
+        workspaceMonitor.startMonitoring(handlers: WorkspaceEventHandlers(
+            didLaunch: { [weak self] application in
+                self?.applicationDidLaunch(application)
+            },
+            didTerminate: { [weak self] application in
+                self?.applicationDidTerminate(application)
+            },
+            needsReconciliation: { [weak self] in
+                self?.reconcile()
+            }
+        ))
+        reconcile()
+
+        if reconciliationInterval > 0 {
+            let timer = Timer.scheduledTimer(
+                withTimeInterval: reconciliationInterval,
+                repeats: true
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.reconcile()
+                }
+            }
+            timer.tolerance = min(30, reconciliationInterval * 0.1)
+            reconciliationTimer = timer
         }
     }
 
     deinit {
-        pollTimer?.invalidate()
-        caffeinateManager.stop()
+        reconciliationTimer?.invalidate()
     }
-
-    // MARK: - Public
 
     func setEnabled(_ bundleID: String, _ enabled: Bool) {
         if enabled {
-            if let app = apps.first(where: { $0.id == bundleID }) {
-                enabledApps[bundleID] = EnabledApp(id: bundleID, name: app.name, iconData: app.icon.pngData)
-            }
+            guard let metadata = metadataCache[bundleID] else { return }
+            enabledApps[bundleID] = EnabledApp(
+                id: bundleID,
+                name: metadata.name,
+                iconData: metadata.icon.pngData
+            )
         } else {
             enabledApps.removeValue(forKey: bundleID)
         }
-        refreshAll()
-        persist()
+
+        publishState()
+        persistEnabledApps()
     }
 
     func isEnabled(_ bundleID: String) -> Bool {
@@ -90,83 +146,141 @@ final class AppMonitor {
     }
 
     func setExcluded(_ bundleID: String, _ excluded: Bool) {
-        // Capture before refreshAll changes the lists
-        let appForInfo = excluded ? visibleApps.first(where: { $0.id == bundleID }) : nil
-
         if excluded {
             excludedApps.insert(bundleID)
+            if let metadata = metadataCache[bundleID] {
+                excludedAppInfo[bundleID] = EnabledApp(
+                    id: bundleID,
+                    name: metadata.name,
+                    iconData: metadata.icon.pngData
+                )
+            }
         } else {
             excludedApps.remove(bundleID)
             excludedAppInfo.removeValue(forKey: bundleID)
         }
 
-        // Update UI immediately
-        refreshAll()
-
-        // Persist after UI update (PNG encoding + JSON serialization is slow)
-        if let app = appForInfo {
-            excludedAppInfo[bundleID] = EnabledApp(id: bundleID, name: app.name, iconData: app.icon.pngData)
-        }
+        publishState()
         persistExcludedInfo()
     }
 
-    // MARK: - Refresh
+    private func applicationDidLaunch(_ application: WorkspaceApplication) {
+        guard application.activationPolicy == .regular,
+              let bundleID = application.bundleIdentifier else { return }
 
-    private func refreshAll() {
-        let snapshot = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular }
+        runningProcessIDs[bundleID, default: []].insert(application.processIdentifier)
+        cacheMetadata(for: application, bundleID: bundleID)
+        signposter.emitEvent("Application Launched")
+        publishState()
+    }
 
-        var seen = Set<String>()
-        var newApps: [RunningApp] = []
-        var visible: [RunningApp] = []
-        var hidden: [RunningApp] = []
-
-        for nsApp in snapshot {
-            guard let id = nsApp.bundleIdentifier, !seen.contains(id) else { continue }
-            seen.insert(id)
-
-            let entry = RunningApp(
-                id: id,
-                name: nsApp.localizedName ?? id,
-                icon: nsApp.icon ?? NSImage(),
-                isRunning: true
-            )
-
-            if excludedApps.contains(id) {
-                hidden.append(entry)
-            } else {
-                visible.append(entry)
-                newApps.append(entry)
+    private func applicationDidTerminate(_ application: WorkspaceApplication) {
+        if let bundleID = application.bundleIdentifier {
+            runningProcessIDs[bundleID]?.remove(application.processIdentifier)
+            if runningProcessIDs[bundleID]?.isEmpty == true {
+                runningProcessIDs.removeValue(forKey: bundleID)
+            }
+        } else {
+            for bundleID in Array(runningProcessIDs.keys) {
+                runningProcessIDs[bundleID]?.remove(application.processIdentifier)
+                if runningProcessIDs[bundleID]?.isEmpty == true {
+                    runningProcessIDs.removeValue(forKey: bundleID)
+                }
             }
         }
 
-        // Toggled-but-quit apps (menu bar list only)
-        for (id, stored) in enabledApps where !seen.contains(id) && !excludedApps.contains(id) {
-            newApps.append(RunningApp(id: id, name: stored.name, icon: stored.icon, isRunning: false))
-        }
-
-        // Excluded apps that aren't currently running (settings list only)
-        for (id, info) in excludedAppInfo where !seen.contains(id) && excludedApps.contains(id) {
-            hidden.append(RunningApp(id: id, name: info.name, icon: info.icon, isRunning: false))
-        }
-
-        newApps.sort(by: RunningApp.runningFirst)
-        visible.sort(by: RunningApp.alphabetical)
-        hidden.sort(by: RunningApp.alphabetical)
-
-        if newApps != apps { apps = newApps }
-        if visible != visibleApps { visibleApps = visible }
-        if hidden != hiddenApps { hiddenApps = hidden }
-
-        // Update caffeinate
-        let shouldRun = newApps.contains { $0.isRunning && enabledApps[$0.id] != nil }
-        caffeinateManager.update(shouldRun: shouldRun, keepDisplayOn: keepDisplayOn)
-        isCaffeinateRunning = caffeinateManager.isRunning
+        signposter.emitEvent("Application Terminated")
+        publishState()
     }
 
-    // MARK: - Persistence
+    private func reconcile() {
+        let interval = signposter.beginInterval("Workspace Reconciliation")
+        defer {
+            signposter.endInterval("Workspace Reconciliation", interval)
+        }
 
-    private func persist() {
+        var reconciledProcessIDs: [String: Set<pid_t>] = [:]
+
+        for application in workspaceMonitor.runningApplications
+        where application.activationPolicy == .regular {
+            guard let bundleID = application.bundleIdentifier else { continue }
+            reconciledProcessIDs[bundleID, default: []].insert(application.processIdentifier)
+            cacheMetadata(for: application, bundleID: bundleID)
+        }
+
+        runningProcessIDs = reconciledProcessIDs
+        publishState(forceCaffeinateCheck: true)
+    }
+
+    private func cacheMetadata(for application: WorkspaceApplication, bundleID: String) {
+        guard metadataCache[bundleID] == nil else { return }
+        metadataCache[bundleID] = AppMetadata(
+            name: application.localizedName ?? bundleID,
+            icon: application.icon ?? NSImage()
+        )
+    }
+
+    private func publishState(forceCaffeinateCheck: Bool = false) {
+        let runningBundleIDs = Set(runningProcessIDs.keys)
+        let presentation = AppPresentationBuilder.build(
+            input: AppPresentationInput(
+                runningBundleIDs: runningBundleIDs,
+                enabledApps: enabledApps,
+                excludedApps: excludedApps,
+                excludedAppInfo: excludedAppInfo
+            ),
+            metadataCache: &metadataCache
+        )
+
+        publish(presentation)
+        updateCaffeinate(
+            runningBundleIDs: runningBundleIDs,
+            forceCheck: forceCaffeinateCheck
+        )
+    }
+
+    private func publish(_ presentation: AppPresentationState) {
+        var didPublish = false
+
+        if presentation.apps != apps {
+            apps = presentation.apps
+            didPublish = true
+        }
+        if presentation.visibleApps != visibleApps {
+            visibleApps = presentation.visibleApps
+            didPublish = true
+        }
+        if presentation.hiddenApps != hiddenApps {
+            hiddenApps = presentation.hiddenApps
+            didPublish = true
+        }
+
+        if didPublish {
+            signposter.emitEvent("Published App State")
+        }
+    }
+
+    private func updateCaffeinate(
+        runningBundleIDs: Set<String>,
+        forceCheck: Bool
+    ) {
+        let shouldCaffeinate = runningBundleIDs.contains { enabledApps[$0] != nil }
+        if forceCheck || shouldCaffeinate != lastRequestedCaffeinateState {
+            caffeinateManager.update(
+                shouldRun: shouldCaffeinate,
+                keepDisplayOn: keepDisplayOn
+            )
+            lastRequestedCaffeinateState = shouldCaffeinate
+        }
+
+        let managerIsRunning = caffeinateManager.isRunning
+        if managerIsRunning != isCaffeinateRunning {
+            isCaffeinateRunning = managerIsRunning
+            signposter.emitEvent("Caffeinate State Changed")
+        }
+    }
+
+    private func persistEnabledApps() {
         if let data = try? JSONEncoder().encode(enabledApps) {
             defaults.set(data, forKey: Self.defaultsKey)
         }

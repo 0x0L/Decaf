@@ -1,9 +1,21 @@
 import Foundation
 
-final class CaffeinateManager {
+@MainActor
+protocol CaffeinateManaging: AnyObject {
+    var isRunning: Bool { get }
+
+    func update(shouldRun: Bool, keepDisplayOn: Bool)
+    func restart(keepDisplayOn: Bool)
+    func stop()
+}
+
+@MainActor
+final class CaffeinateManager: CaffeinateManaging {
     private var process: Process?
 
-    var isRunning: Bool { process?.isRunning == true }
+    var isRunning: Bool {
+        process?.isRunning == true
+    }
 
     func update(shouldRun: Bool, keepDisplayOn: Bool) {
         if shouldRun, !isRunning {
@@ -50,6 +62,8 @@ final class CaffeinateManager {
     }
 
     deinit {
-        stop()
+        if let process, process.isRunning {
+            process.terminate()
+        }
     }
 }

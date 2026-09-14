@@ -32,7 +32,7 @@ Open Settings to hide apps from the menu, toggle "Keep Display On", or enable La
 
 ## Requirements
 
-- macOS 15+
+- macOS 27+
 
 ## License
 
