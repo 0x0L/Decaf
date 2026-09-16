@@ -1,11 +1,14 @@
 import AppKit
 import Foundation
+import Observation
 import Testing
 @testable import Decaf
 
 @Suite(.serialized)
 @MainActor
 struct AppMonitorTests {
+    private let preferences = TestPreferences()
+
     @Test
     func `Initial snapshot includes only regular applications`() {
         let workspace = FakeWorkspaceMonitor(runningApplications: [
@@ -20,8 +23,8 @@ struct AppMonitorTests {
         ])
         let monitor = makeMonitor(workspace: workspace)
 
-        #expect(monitor.visibleApps.map(\.name) == ["Alpha", "Beta"])
-        #expect(monitor.apps.map(\.id) == [
+        #expect(monitor.availableApps.map(\.name) == ["Alpha", "Beta"])
+        #expect(monitor.menuApps.map(\.id) == [
             "com.example.alpha",
             "com.example.beta"
         ])
@@ -38,12 +41,12 @@ struct AppMonitorTests {
         workspace.sendLaunch(second)
         workspace.sendTermination(first)
 
-        #expect(monitor.apps.count == 1)
-        #expect(monitor.apps.first?.isRunning == true)
+        #expect(monitor.menuApps.count == 1)
+        #expect(monitor.menuApps.first?.isRunning == true)
 
         workspace.sendTermination(second)
 
-        #expect(monitor.apps.isEmpty)
+        #expect(monitor.menuApps.isEmpty)
     }
 
     @Test
@@ -56,9 +59,9 @@ struct AppMonitorTests {
         monitor.setEnabled("com.example.editor", true)
         workspace.sendTermination(application)
 
-        #expect(monitor.apps.count == 1)
-        #expect(monitor.apps.first?.name == "Editor")
-        #expect(monitor.apps.first?.isRunning == false)
+        #expect(monitor.menuApps.count == 1)
+        #expect(monitor.menuApps.first?.name == "Editor")
+        #expect(monitor.menuApps.first?.isRunning == false)
     }
 
     @Test
@@ -99,8 +102,8 @@ struct AppMonitorTests {
             activationPolicy: .prohibited
         ))
 
-        #expect(monitor.apps.first?.isRunning == false)
-        #expect(monitor.visibleApps.isEmpty)
+        #expect(monitor.menuApps.first?.isRunning == false)
+        #expect(monitor.availableApps.isEmpty)
         #expect(monitor.isEnabled("com.example.editor"))
         #expect(!monitor.isCaffeinateRunning)
         #expect(!caffeinate.isRunning)
@@ -119,13 +122,13 @@ struct AppMonitorTests {
         workspace.runningApplications = [second]
         workspace.sendTermination(makeApplication(id: "com.example.editor", name: "Editor", pid: -1))
 
-        #expect(monitor.apps.first?.isRunning == true)
+        #expect(monitor.menuApps.first?.isRunning == true)
         #expect(caffeinate.isRunning)
 
         workspace.runningApplications = []
         workspace.sendTermination(makeApplication(id: "com.example.editor", name: "Editor", pid: -1))
 
-        #expect(monitor.apps.first?.isRunning == false)
+        #expect(monitor.menuApps.first?.isRunning == false)
         #expect(!caffeinate.isRunning)
     }
 
@@ -144,8 +147,8 @@ struct AppMonitorTests {
         )]
         workspace.requestReconciliation()
 
-        #expect(monitor.apps.first?.isRunning == false)
-        #expect(monitor.visibleApps.isEmpty)
+        #expect(monitor.menuApps.first?.isRunning == false)
+        #expect(monitor.availableApps.isEmpty)
         #expect(!caffeinate.isRunning)
         #expect(!monitor.isCaffeinateRunning)
 
@@ -153,7 +156,7 @@ struct AppMonitorTests {
         workspace.runningApplications = [application]
         workspace.requestReconciliation()
 
-        #expect(monitor.apps.first?.isRunning == true)
+        #expect(monitor.menuApps.first?.isRunning == true)
         #expect(caffeinate.isRunning)
         #expect(monitor.isCaffeinateRunning)
     }
@@ -175,14 +178,14 @@ struct AppMonitorTests {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(!monitor.isCaffeinateRunning)
-        #expect(monitor.apps.first?.isRunning == false)
+        #expect(monitor.menuApps.first?.isRunning == false)
 
         workspace.runningApplications = [application]
         for _ in 0..<100 where !monitor.isCaffeinateRunning {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(monitor.isCaffeinateRunning)
-        #expect(monitor.apps.first?.isRunning == true)
+        #expect(monitor.menuApps.first?.isRunning == true)
     }
 
     @Test
@@ -196,8 +199,8 @@ struct AppMonitorTests {
         monitor.setExcluded("com.example.editor", true)
 
         #expect(workspace.snapshotReadCount == 1)
-        #expect(monitor.apps.isEmpty)
-        #expect(monitor.visibleApps.isEmpty)
+        #expect(monitor.menuApps.isEmpty)
+        #expect(monitor.availableApps.isEmpty)
         #expect(monitor.hiddenApps.map(\.id) == ["com.example.editor"])
     }
 
@@ -211,8 +214,125 @@ struct AppMonitorTests {
         ]
         workspace.requestReconciliation()
 
-        #expect(monitor.apps.map(\.id) == ["com.example.editor"])
-        #expect(monitor.apps.first?.isRunning == true)
+        #expect(monitor.menuApps.map(\.id) == ["com.example.editor"])
+        #expect(monitor.menuApps.first?.isRunning == true)
+    }
+
+    @Test
+    func `Selections hidden metadata and display preference survive restart`() {
+        let editor = makeApplication(id: "editor", name: "Editor", pid: 1)
+        let reader = makeApplication(id: "reader", name: "Reader", pid: 2)
+        let workspace = FakeWorkspaceMonitor(runningApplications: [editor, reader])
+        let monitor = makeMonitor(workspace: workspace)
+        monitor.setEnabled("editor", true)
+        monitor.setEnabled("reader", true)
+        monitor.setExcluded("reader", true)
+        monitor.keepDisplayOn = true
+
+        let restored = makeMonitor(workspace: FakeWorkspaceMonitor())
+        #expect(restored.keepDisplayOn)
+        #expect(restored.isEnabled("editor"))
+        #expect(restored.isEnabled("reader"))
+        #expect(restored.menuApps.map(\.name) == ["Editor"])
+        #expect(restored.hiddenApps.map(\.name) == ["Reader"])
+        #expect(restored.menuApps.allSatisfy { !$0.isRunning })
+        #expect(restored.hiddenApps.allSatisfy { !$0.isRunning })
+        #expect(!restored.isCaffeinateRunning)
+
+        restored.setExcluded("reader", false)
+        #expect(restored.menuApps.map(\.name) == ["Editor", "Reader"])
+    }
+
+    @Test
+    func `Live metadata replaces saved metadata and remains cached`() throws {
+        let saved = StoredApp(id: "editor", name: "Old Editor", iconData: Data())
+        preferences.defaults.set(try JSONEncoder().encode(["editor": saved]), forKey: "enabledApps")
+        let workspace = FakeWorkspaceMonitor()
+        let monitor = makeMonitor(workspace: workspace)
+        let savedIcon = try #require(monitor.menuApps.first?.icon)
+        let live = makeApplication(id: "editor", name: "Editor", pid: 1)
+
+        workspace.sendLaunch(live)
+        #expect(monitor.menuApps.first?.name == "Editor")
+        #expect(monitor.menuApps.first?.icon === live.icon)
+        #expect(monitor.menuApps.first?.icon !== savedIcon)
+        #expect(monitor.enabledApps["editor"]?.name == "Editor")
+
+        workspace.requestReconciliation()
+        #expect(monitor.menuApps.first?.icon === live.icon)
+        let restored = makeMonitor(workspace: FakeWorkspaceMonitor())
+        #expect(restored.menuApps.first?.name == "Editor")
+    }
+
+    @Test
+    func `Icon-only live metadata changes update stopped entries`() throws {
+        let saved = StoredApp(id: "editor", name: "Editor", iconData: Data())
+        preferences.defaults.set(try JSONEncoder().encode(["editor": saved]), forKey: "enabledApps")
+        let workspace = FakeWorkspaceMonitor()
+        let monitor = makeMonitor(workspace: workspace)
+        let old = try #require(monitor.menuApps.first)
+        let live = makeApplication(id: "editor", name: "Editor", pid: 1)
+        workspace.sendLaunch(live)
+        workspace.sendTermination(live)
+        let updated = try #require(monitor.menuApps.first)
+        #expect(updated.name == old.name)
+        #expect(updated.isRunning == old.isRunning)
+        #expect(updated.icon !== old.icon)
+        #expect(updated != old)
+    }
+
+    @Test
+    func `Unchanged snapshot recovers a stopped helper and hiding does not disable it`() {
+        let workspace = FakeWorkspaceMonitor(runningApplications: [
+            makeApplication(id: "editor", name: "Editor", pid: 1)
+        ])
+        let caffeinate = FakeCaffeinateManager()
+        let monitor = makeMonitor(workspace: workspace, caffeinate: caffeinate)
+        monitor.setEnabled("editor", true)
+        monitor.setExcluded("editor", true)
+        #expect(monitor.menuApps.isEmpty)
+        #expect(caffeinate.isRunning)
+        caffeinate.stop()
+        workspace.requestReconciliation()
+        #expect(caffeinate.isRunning)
+        #expect(monitor.isCaffeinateRunning)
+    }
+
+    @Test
+    func `Unchanged snapshots do not republish app lists`() {
+        let workspace = FakeWorkspaceMonitor(runningApplications: [
+            makeApplication(id: "editor", name: "Editor", pid: 1)
+        ])
+        let monitor = makeMonitor(workspace: workspace)
+        withObservationTracking {
+            _ = monitor.menuApps
+            _ = monitor.availableApps
+            _ = monitor.hiddenApps
+        } onChange: {
+            Issue.record("An unchanged snapshot republished the app lists")
+        }
+        workspace.requestReconciliation()
+        workspace.requestReconciliation()
+    }
+
+    @Test
+    func `Display mode restarts an active helper but never starts an idle one`() {
+        let workspace = FakeWorkspaceMonitor(runningApplications: [
+            makeApplication(id: "editor", name: "Editor", pid: 1)
+        ])
+        let caffeinate = FakeCaffeinateManager()
+        let monitor = makeMonitor(workspace: workspace, caffeinate: caffeinate)
+        monitor.keepDisplayOn = true
+        #expect(caffeinate.restartRequests.isEmpty)
+        monitor.setEnabled("editor", true)
+        #expect(caffeinate.requests.last?.keepDisplayOn == true)
+        monitor.keepDisplayOn = false
+        #expect(caffeinate.restartRequests == [false])
+        #expect(caffeinate.isRunning)
+        monitor.setEnabled("editor", false)
+        monitor.keepDisplayOn = true
+        #expect(caffeinate.restartRequests == [false])
+        #expect(!caffeinate.isRunning)
     }
 
     private func makeMonitor(workspace: FakeWorkspaceMonitor) -> AppMonitor {
@@ -227,14 +347,10 @@ struct AppMonitorTests {
         caffeinate: FakeCaffeinateManager,
         reconciliationInterval: TimeInterval = 0
     ) -> AppMonitor {
-        let suiteName = "AppMonitorTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-
-        return AppMonitor(
+        AppMonitor(
             workspaceMonitor: workspace,
             caffeinateManager: caffeinate,
-            defaults: defaults,
+            defaults: preferences.defaults,
             reconciliationInterval: reconciliationInterval
         )
     }
@@ -278,10 +394,6 @@ private final class FakeWorkspaceMonitor: WorkspaceMonitoring {
         self.handlers = handlers
     }
 
-    func stopMonitoring() {
-        handlers = nil
-    }
-
     func sendLaunch(_ application: WorkspaceApplication) {
         storedRunningApplications.append(application)
         handlers?.didLaunch(application)
@@ -291,7 +403,7 @@ private final class FakeWorkspaceMonitor: WorkspaceMonitoring {
         storedRunningApplications.removeAll {
             $0.processIdentifier == application.processIdentifier
         }
-        handlers?.didTerminate(application)
+        handlers?.didTerminate()
     }
 
     func requestReconciliation() {
@@ -325,5 +437,18 @@ private final class FakeCaffeinateManager: CaffeinateManaging {
 
     func stop() {
         isRunning = false
+    }
+}
+
+private final class TestPreferences {
+    let suiteName = "AppMonitorTests.\(UUID().uuidString)"
+    let defaults: UserDefaults
+
+    init() {
+        defaults = UserDefaults(suiteName: suiteName)!
+    }
+
+    deinit {
+        defaults.removePersistentDomain(forName: suiteName)
     }
 }

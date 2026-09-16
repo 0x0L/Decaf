@@ -3,16 +3,16 @@ import SwiftUI
 struct ContentView: View {
     @Environment(AppMonitor.self) private var monitor
 
-    private var runningApps: [RunningApp] {
-        monitor.apps.filter(\.isRunning)
+    private var runningApps: [AppEntry] {
+        monitor.menuApps.filter(\.isRunning)
     }
 
-    private var watchedApps: [RunningApp] {
-        monitor.apps.filter { !$0.isRunning }
+    private var stoppedApps: [AppEntry] {
+        monitor.menuApps.filter { !$0.isRunning }
     }
 
     var body: some View {
-        if runningApps.isEmpty && watchedApps.isEmpty {
+        if runningApps.isEmpty && stoppedApps.isEmpty {
             Text("No apps running")
                 .foregroundStyle(.secondary)
         }
@@ -21,14 +21,14 @@ struct ContentView: View {
             appToggle(app)
         }
 
-        if !watchedApps.isEmpty {
+        if !stoppedApps.isEmpty {
             Divider()
 
             Text("Not running")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            ForEach(watchedApps) { app in
+            ForEach(stoppedApps) { app in
                 appToggle(app)
             }
         }
@@ -52,7 +52,7 @@ struct ContentView: View {
         }
     }
 
-    private func appToggle(_ app: RunningApp) -> some View {
+    private func appToggle(_ app: AppEntry) -> some View {
         Toggle(isOn: Binding(
             get: { monitor.isEnabled(app.id) },
             set: { monitor.setEnabled(app.id, $0) }

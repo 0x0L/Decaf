@@ -32,12 +32,13 @@ struct WorkspaceApplication {
 
 struct WorkspaceEventHandlers {
     let didLaunch: @MainActor (WorkspaceApplication) -> Void
-    let didTerminate: @MainActor (WorkspaceApplication) -> Void
+    let didTerminate: @MainActor () -> Void
     let needsReconciliation: @MainActor () -> Void
 }
 
 @MainActor
 protocol WorkspaceMonitoring: AnyObject {
+    // Snapshot candidates; AppMonitor decides which activation policies count as running.
     var runningApplications: [WorkspaceApplication] { get }
 
     func startMonitoring(handlers: WorkspaceEventHandlers)
@@ -59,7 +60,7 @@ final class SystemWorkspaceMonitor: WorkspaceMonitoring {
                   application.activationPolicy == .regular,
                   let bundleID = application.bundleIdentifier else { return nil }
 
-            // Poll only cheap process properties; loading app icons each second is costly.
+            // Poll only cheap process properties; loading app icons on every poll is costly.
             if let metadata = metadataCache[bundleID] {
                 return WorkspaceApplication(
                     bundleIdentifier: bundleID,
@@ -89,8 +90,8 @@ final class SystemWorkspaceMonitor: WorkspaceMonitoring {
             center.addObserver(
                 of: workspace,
                 for: NSWorkspace.DidTerminateApplicationMessage.self
-            ) { message in
-                handlers.didTerminate(WorkspaceApplication(message.application))
+            ) { _ in
+                handlers.didTerminate()
             },
             center.addObserver(
                 of: workspace,
@@ -105,9 +106,5 @@ final class SystemWorkspaceMonitor: WorkspaceMonitoring {
                 handlers.needsReconciliation()
             }
         ]
-    }
-
-    deinit {
-        observationTokens.removeAll()
     }
 }

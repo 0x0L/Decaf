@@ -12,3 +12,7 @@ playground.xcworkspace
 
 # macOS
 .DS_Store
+
+# Local builds
+/build/
+/Decaf.app/

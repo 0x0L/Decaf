@@ -7,112 +7,49 @@ struct AppMetadata {
 
 struct AppPresentationInput {
     let runningBundleIDs: Set<String>
-    let enabledApps: [String: EnabledApp]
+    let enabledApps: [String: StoredApp]
     let excludedApps: Set<String>
-    let excludedAppInfo: [String: EnabledApp]
+    let excludedAppInfo: [String: StoredApp]
 }
 
 struct AppPresentationState {
-    var apps: [RunningApp] = []
-    var visibleApps: [RunningApp] = []
-    var hiddenApps: [RunningApp] = []
+    var menuApps: [AppEntry] = []
+    var availableApps: [AppEntry] = []
+    var hiddenApps: [AppEntry] = []
 }
 
 enum AppPresentationBuilder {
     static func build(
         input: AppPresentationInput,
-        metadataCache: inout [String: AppMetadata]
+        metadataCache: [String: AppMetadata]
     ) -> AppPresentationState {
         var state = AppPresentationState()
-        appendRunningApps(
-            input: input,
-            metadataCache: metadataCache,
-            state: &state
-        )
-        appendPersistedApps(
-            input: input,
-            metadataCache: &metadataCache,
-            state: &state
-        )
+        let bundleIDs = input.runningBundleIDs
+            .union(input.enabledApps.keys)
+            .union(input.excludedAppInfo.keys)
 
-        state.apps.sort(by: RunningApp.runningFirst)
-        state.visibleApps.sort(by: RunningApp.alphabetical)
-        state.hiddenApps.sort(by: RunningApp.alphabetical)
-        return state
-    }
-
-    private static func appendRunningApps(
-        input: AppPresentationInput,
-        metadataCache: [String: AppMetadata],
-        state: inout AppPresentationState
-    ) {
-        for bundleID in input.runningBundleIDs {
+        // AppMonitor supplies metadata for both live and persisted entries.
+        for bundleID in bundleIDs {
             guard let metadata = metadataCache[bundleID] else { continue }
-            let app = RunningApp(
-                id: bundleID,
-                name: metadata.name,
-                icon: metadata.icon,
-                isRunning: true
+            let isRunning = input.runningBundleIDs.contains(bundleID)
+            let entry = AppEntry(
+                id: bundleID, name: metadata.name, icon: metadata.icon, isRunning: isRunning
             )
-
             if input.excludedApps.contains(bundleID) {
-                state.hiddenApps.append(app)
-            } else {
-                state.visibleApps.append(app)
-                state.apps.append(app)
+                if isRunning || input.excludedAppInfo[bundleID] != nil {
+                    state.hiddenApps.append(entry)
+                }
+            } else if isRunning {
+                state.availableApps.append(entry)
+                state.menuApps.append(entry)
+            } else if input.enabledApps[bundleID] != nil {
+                state.menuApps.append(entry)
             }
         }
-    }
 
-    private static func appendPersistedApps(
-        input: AppPresentationInput,
-        metadataCache: inout [String: AppMetadata],
-        state: inout AppPresentationState
-    ) {
-        for (bundleID, stored) in input.enabledApps
-        where !input.runningBundleIDs.contains(bundleID)
-            && !input.excludedApps.contains(bundleID) {
-            let metadata = cachedMetadata(
-                bundleID: bundleID,
-                stored: stored,
-                metadataCache: &metadataCache
-            )
-            state.apps.append(RunningApp(
-                id: bundleID,
-                name: metadata.name,
-                icon: metadata.icon,
-                isRunning: false
-            ))
-        }
-
-        for (bundleID, stored) in input.excludedAppInfo
-        where !input.runningBundleIDs.contains(bundleID)
-            && input.excludedApps.contains(bundleID) {
-            let metadata = cachedMetadata(
-                bundleID: bundleID,
-                stored: stored,
-                metadataCache: &metadataCache
-            )
-            state.hiddenApps.append(RunningApp(
-                id: bundleID,
-                name: metadata.name,
-                icon: metadata.icon,
-                isRunning: false
-            ))
-        }
-    }
-
-    private static func cachedMetadata(
-        bundleID: String,
-        stored: EnabledApp,
-        metadataCache: inout [String: AppMetadata]
-    ) -> AppMetadata {
-        if let metadata = metadataCache[bundleID] {
-            return metadata
-        }
-
-        let metadata = AppMetadata(name: stored.name, icon: stored.icon)
-        metadataCache[bundleID] = metadata
-        return metadata
+        state.menuApps.sort(by: AppEntry.runningFirst)
+        state.availableApps.sort(by: AppEntry.alphabetical)
+        state.hiddenApps.sort(by: AppEntry.alphabetical)
+        return state
     }
 }

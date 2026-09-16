@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 @MainActor
 protocol CaffeinateManaging: AnyObject {
@@ -12,6 +13,13 @@ protocol CaffeinateManaging: AnyObject {
 @MainActor
 final class CaffeinateManager: CaffeinateManaging {
     private var process: Process?
+    private var lastLaunchFailure: String?
+    private let launchProcess: (Process) throws -> Void
+    private let logger = Logger(subsystem: "org.0x0L.Decaf", category: "Caffeinate")
+
+    init(launchProcess: @escaping (Process) throws -> Void = { try $0.run() }) {
+        self.launchProcess = launchProcess
+    }
 
     var isRunning: Bool {
         process?.isRunning == true
@@ -20,7 +28,7 @@ final class CaffeinateManager: CaffeinateManaging {
     func update(shouldRun: Bool, keepDisplayOn: Bool) {
         if shouldRun, !isRunning {
             start(keepDisplayOn: keepDisplayOn)
-        } else if !shouldRun, isRunning {
+        } else if !shouldRun {
             stop()
         }
     }
@@ -31,12 +39,9 @@ final class CaffeinateManager: CaffeinateManaging {
     }
 
     func stop() {
-        guard let process, process.isRunning else { return }
-        process.terminate()
-        self.process = nil
-        #if DEBUG
-            print("caffeinate stopped")
-        #endif
+        if let process, process.isRunning { process.terminate() }
+        process = nil
+        lastLaunchFailure = nil
     }
 
     private func start(keepDisplayOn: Bool) {
@@ -48,16 +53,19 @@ final class CaffeinateManager: CaffeinateManaging {
         process.standardError = FileHandle.nullDevice
 
         do {
-            try process.run()
+            try launchProcess(process)
             self.process = process
-            #if DEBUG
-                print("caffeinate started")
-            #endif
+            if lastLaunchFailure != nil {
+                logger.notice("Caffeinate recovered after a launch failure")
+                lastLaunchFailure = nil
+            }
         } catch {
             self.process = nil
-            #if DEBUG
-                print("Failed to start caffeinate: \(error)")
-            #endif
+            let failure = error.localizedDescription
+            if failure != lastLaunchFailure {
+                logger.error("Failed to start caffeinate: \(failure, privacy: .public)")
+                lastLaunchFailure = failure
+            }
         }
     }
 

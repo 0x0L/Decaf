@@ -16,6 +16,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Run tests
+        run: |
+          xcodebuild test \
+            -project Decaf.xcodeproj \
+            -scheme Decaf \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO
+
       - name: Build archive
         run: |
           xcodebuild archive \

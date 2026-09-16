@@ -5,10 +5,10 @@ import OSLog
 @MainActor
 @Observable
 final class AppMonitor {
-    private(set) var apps: [RunningApp] = []
-    private(set) var enabledApps: [String: EnabledApp] = [:]
-    private(set) var visibleApps: [RunningApp] = []
-    private(set) var hiddenApps: [RunningApp] = []
+    private(set) var menuApps: [AppEntry] = []
+    private(set) var enabledApps: [String: StoredApp] = [:]
+    private(set) var availableApps: [AppEntry] = []
+    private(set) var hiddenApps: [AppEntry] = []
     private(set) var isCaffeinateRunning = false
 
     var keepDisplayOn: Bool {
@@ -38,9 +38,10 @@ final class AppMonitor {
         category: "AppMonitoring"
     )
     @ObservationIgnored private var reconciliationTimer: Timer?
-    @ObservationIgnored private var runningProcessIDs: [String: Set<pid_t>] = [:]
+    @ObservationIgnored private var runningBundleIDs: Set<String> = []
+    @ObservationIgnored private var liveMetadataBundleIDs: Set<String> = []
     @ObservationIgnored private var metadataCache: [String: AppMetadata] = [:]
-    @ObservationIgnored private var excludedAppInfo: [String: EnabledApp] = [:]
+    @ObservationIgnored private var excludedAppInfo: [String: StoredApp] = [:]
     @ObservationIgnored private var lastRequestedCaffeinateState: Bool?
     @ObservationIgnored private var isInitializing = true
 
@@ -77,11 +78,11 @@ final class AppMonitor {
         keepDisplayOn = defaults.bool(forKey: Self.keepDisplayOnKey)
 
         if let data = defaults.data(forKey: Self.defaultsKey),
-           let decoded = try? JSONDecoder().decode([String: EnabledApp].self, from: data) {
+           let decoded = try? JSONDecoder().decode([String: StoredApp].self, from: data) {
             enabledApps = decoded
         }
         if let data = defaults.data(forKey: Self.excludedAppInfoKey),
-           let decoded = try? JSONDecoder().decode([String: EnabledApp].self, from: data) {
+           let decoded = try? JSONDecoder().decode([String: StoredApp].self, from: data) {
             excludedAppInfo = decoded
         }
 
@@ -98,7 +99,7 @@ final class AppMonitor {
             didLaunch: { [weak self] application in
                 self?.applicationDidLaunch(application)
             },
-            didTerminate: { [weak self] _ in
+            didTerminate: { [weak self] in
                 self?.applicationDidTerminate()
             },
             needsReconciliation: { [weak self] in
@@ -108,12 +109,13 @@ final class AppMonitor {
         reconcile()
 
         if reconciliationInterval > 0 {
-            // Policy changes (for example Books quitting its UI) have no exit event.
+            // Books can quit its UI without an exit event. Per-app KVO was removed
+            // after crashes; keep polling for activation-policy changes.
             let timer = Timer(
                 timeInterval: reconciliationInterval,
                 repeats: true
             ) { [weak self] _ in
-                MainActor.assumeIsolated {
+                Task { @MainActor [weak self] in
                     self?.reconcile()
                 }
             }
@@ -130,11 +132,7 @@ final class AppMonitor {
     func setEnabled(_ bundleID: String, _ enabled: Bool) {
         if enabled {
             guard let metadata = metadataCache[bundleID] else { return }
-            enabledApps[bundleID] = EnabledApp(
-                id: bundleID,
-                name: metadata.name,
-                iconData: metadata.icon.pngData
-            )
+            enabledApps[bundleID] = StoredApp(id: bundleID, name: metadata.name, iconData: metadata.icon.pngData)
         } else {
             enabledApps.removeValue(forKey: bundleID)
         }
@@ -151,7 +149,7 @@ final class AppMonitor {
         if excluded {
             excludedApps.insert(bundleID)
             if let metadata = metadataCache[bundleID] {
-                excludedAppInfo[bundleID] = EnabledApp(
+                excludedAppInfo[bundleID] = StoredApp(
                     id: bundleID,
                     name: metadata.name,
                     iconData: metadata.icon.pngData
@@ -170,7 +168,7 @@ final class AppMonitor {
         guard application.activationPolicy == .regular,
               let bundleID = application.bundleIdentifier else { return }
 
-        runningProcessIDs[bundleID, default: []].insert(application.processIdentifier)
+        runningBundleIDs.insert(bundleID)
         cacheMetadata(for: application, bundleID: bundleID)
         signposter.emitEvent("Application Launched")
         publishState()
@@ -178,8 +176,7 @@ final class AppMonitor {
 
     private func applicationDidTerminate() {
         signposter.emitEvent("Application Terminated")
-        // A terminated NSRunningApplication may no longer expose its original PID.
-        // Refresh on exit so stale process IDs cannot keep caffeinate running.
+        // Refresh the snapshot rather than relying on a terminated app’s metadata.
         reconcile()
     }
 
@@ -189,33 +186,51 @@ final class AppMonitor {
             signposter.endInterval("Workspace Reconciliation", interval)
         }
 
-        var reconciledProcessIDs: [String: Set<pid_t>] = [:]
+        var currentBundleIDs: Set<String> = []
+        var metadataChanged = false
 
         for application in workspaceMonitor.runningApplications
         where application.activationPolicy == .regular {
             guard let bundleID = application.bundleIdentifier else { continue }
-            reconciledProcessIDs[bundleID, default: []].insert(application.processIdentifier)
-            cacheMetadata(for: application, bundleID: bundleID)
+            currentBundleIDs.insert(bundleID)
+            if cacheMetadata(for: application, bundleID: bundleID) { metadataChanged = true }
         }
 
-        if reconciledProcessIDs == runningProcessIDs, lastRequestedCaffeinateState != nil {
-            updateCaffeinate(runningBundleIDs: Set(runningProcessIDs.keys), forceCheck: true)
+        if currentBundleIDs == runningBundleIDs, !metadataChanged, lastRequestedCaffeinateState != nil {
+            // An unchanged app list must still recover an unexpectedly exited helper.
+            updateCaffeinate(forceCheck: true)
             return
         }
-        runningProcessIDs = reconciledProcessIDs
+        runningBundleIDs = currentBundleIDs
         publishState(forceCaffeinateCheck: true)
     }
 
-    private func cacheMetadata(for application: WorkspaceApplication, bundleID: String) {
-        guard metadataCache[bundleID] == nil else { return }
-        metadataCache[bundleID] = AppMetadata(
-            name: application.localizedName ?? bundleID,
-            icon: application.icon ?? NSImage()
+    @discardableResult
+    private func cacheMetadata(for application: WorkspaceApplication, bundleID: String) -> Bool {
+        // Saved metadata is a fallback until the app first appears in this session.
+        guard liveMetadataBundleIDs.insert(bundleID).inserted else { return false }
+        let saved = metadataCache[bundleID]
+        let metadata = AppMetadata(
+            name: application.localizedName ?? saved?.name ?? bundleID,
+            icon: application.icon ?? saved?.icon ?? NSImage()
         )
+        metadataCache[bundleID] = metadata
+
+        if enabledApps[bundleID] != nil || excludedAppInfo[bundleID] != nil {
+            let stored = StoredApp(id: bundleID, name: metadata.name, iconData: metadata.icon.pngData)
+            if let previous = enabledApps[bundleID], previous != stored {
+                enabledApps[bundleID] = stored
+                persistEnabledApps()
+            }
+            if let previous = excludedAppInfo[bundleID], previous != stored {
+                excludedAppInfo[bundleID] = stored
+                persistExcludedInfo()
+            }
+        }
+        return true
     }
 
     private func publishState(forceCaffeinateCheck: Bool = false) {
-        let runningBundleIDs = Set(runningProcessIDs.keys)
         let presentation = AppPresentationBuilder.build(
             input: AppPresentationInput(
                 runningBundleIDs: runningBundleIDs,
@@ -223,25 +238,22 @@ final class AppMonitor {
                 excludedApps: excludedApps,
                 excludedAppInfo: excludedAppInfo
             ),
-            metadataCache: &metadataCache
+            metadataCache: metadataCache
         )
 
         publish(presentation)
-        updateCaffeinate(
-            runningBundleIDs: runningBundleIDs,
-            forceCheck: forceCaffeinateCheck
-        )
+        updateCaffeinate(forceCheck: forceCaffeinateCheck)
     }
 
     private func publish(_ presentation: AppPresentationState) {
         var didPublish = false
 
-        if presentation.apps != apps {
-            apps = presentation.apps
+        if presentation.menuApps != menuApps {
+            menuApps = presentation.menuApps
             didPublish = true
         }
-        if presentation.visibleApps != visibleApps {
-            visibleApps = presentation.visibleApps
+        if presentation.availableApps != availableApps {
+            availableApps = presentation.availableApps
             didPublish = true
         }
         if presentation.hiddenApps != hiddenApps {
@@ -254,10 +266,7 @@ final class AppMonitor {
         }
     }
 
-    private func updateCaffeinate(
-        runningBundleIDs: Set<String>,
-        forceCheck: Bool
-    ) {
+    private func updateCaffeinate(forceCheck: Bool) {
         let shouldCaffeinate = runningBundleIDs.contains { enabledApps[$0] != nil }
         if forceCheck || shouldCaffeinate != lastRequestedCaffeinateState {
             caffeinateManager.update(

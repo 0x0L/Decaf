@@ -8,27 +8,28 @@ extension NSImage {
     }
 }
 
-struct RunningApp: Identifiable, Equatable {
+struct AppEntry: Identifiable, Equatable {
     let id: String // bundleIdentifier
     let name: String
     let icon: NSImage
     var isRunning: Bool
 
-    static func == (lhs: RunningApp, rhs: RunningApp) -> Bool {
-        lhs.id == rhs.id && lhs.name == rhs.name && lhs.isRunning == rhs.isRunning
+    static func == (lhs: AppEntry, rhs: AppEntry) -> Bool {
+        // Icons are cached objects: identity detects replacements without image encoding.
+        lhs.id == rhs.id && lhs.name == rhs.name && lhs.isRunning == rhs.isRunning && lhs.icon === rhs.icon
     }
 
-    nonisolated static func alphabetical(_ lhs: RunningApp, _ rhs: RunningApp) -> Bool {
+    nonisolated static func alphabetical(_ lhs: AppEntry, _ rhs: AppEntry) -> Bool {
         lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
     }
 
-    nonisolated static func runningFirst(_ lhs: RunningApp, _ rhs: RunningApp) -> Bool {
+    nonisolated static func runningFirst(_ lhs: AppEntry, _ rhs: AppEntry) -> Bool {
         if lhs.isRunning != rhs.isRunning { return lhs.isRunning }
         return alphabetical(lhs, rhs)
     }
 }
 
-struct EnabledApp: Codable {
+struct StoredApp: Codable, Equatable {
     let id: String
     let name: String
     let iconData: Data
