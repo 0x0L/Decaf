@@ -47,13 +47,32 @@ protocol WorkspaceMonitoring: AnyObject {
 final class SystemWorkspaceMonitor: WorkspaceMonitoring {
     private let workspace: NSWorkspace
     private var observationTokens: [NotificationCenter.ObservationToken] = []
+    private var metadataCache: [String: WorkspaceApplication] = [:]
 
     init(workspace: NSWorkspace = .shared) {
         self.workspace = workspace
     }
 
     var runningApplications: [WorkspaceApplication] {
-        workspace.runningApplications.map(WorkspaceApplication.init)
+        workspace.runningApplications.compactMap { application in
+            guard !application.isTerminated,
+                  application.activationPolicy == .regular,
+                  let bundleID = application.bundleIdentifier else { return nil }
+
+            // Poll only cheap process properties; loading app icons each second is costly.
+            if let metadata = metadataCache[bundleID] {
+                return WorkspaceApplication(
+                    bundleIdentifier: bundleID,
+                    localizedName: metadata.localizedName,
+                    icon: metadata.icon,
+                    processIdentifier: application.processIdentifier,
+                    activationPolicy: .regular
+                )
+            }
+            let snapshot = WorkspaceApplication(application)
+            metadataCache[bundleID] = snapshot
+            return snapshot
+        }
     }
 
     func startMonitoring(handlers: WorkspaceEventHandlers) {

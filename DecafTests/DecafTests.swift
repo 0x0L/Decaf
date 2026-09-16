@@ -82,6 +82,110 @@ struct AppMonitorTests {
     }
 
     @Test
+    func `Exit with unavailable identity stops caffeinate immediately`() {
+        let application = makeApplication(id: "com.example.editor", name: "Editor", pid: 10)
+        let workspace = FakeWorkspaceMonitor(runningApplications: [application])
+        let caffeinate = FakeCaffeinateManager()
+        let monitor = makeMonitor(workspace: workspace, caffeinate: caffeinate)
+        monitor.setEnabled("com.example.editor", true)
+        #expect(monitor.isCaffeinateRunning)
+
+        workspace.runningApplications = []
+        workspace.sendTermination(WorkspaceApplication(
+            bundleIdentifier: nil,
+            localizedName: nil,
+            icon: nil,
+            processIdentifier: -1,
+            activationPolicy: .prohibited
+        ))
+
+        #expect(monitor.apps.first?.isRunning == false)
+        #expect(monitor.visibleApps.isEmpty)
+        #expect(monitor.isEnabled("com.example.editor"))
+        #expect(!monitor.isCaffeinateRunning)
+        #expect(!caffeinate.isRunning)
+        #expect(workspace.snapshotReadCount == 2)
+    }
+
+    @Test
+    func `Exit with invalid PID preserves another running instance`() {
+        let first = makeApplication(id: "com.example.editor", name: "Editor", pid: 10)
+        let second = makeApplication(id: "com.example.editor", name: "Editor", pid: 11)
+        let workspace = FakeWorkspaceMonitor(runningApplications: [first, second])
+        let caffeinate = FakeCaffeinateManager()
+        let monitor = makeMonitor(workspace: workspace, caffeinate: caffeinate)
+        monitor.setEnabled("com.example.editor", true)
+
+        workspace.runningApplications = [second]
+        workspace.sendTermination(makeApplication(id: "com.example.editor", name: "Editor", pid: -1))
+
+        #expect(monitor.apps.first?.isRunning == true)
+        #expect(caffeinate.isRunning)
+
+        workspace.runningApplications = []
+        workspace.sendTermination(makeApplication(id: "com.example.editor", name: "Editor", pid: -1))
+
+        #expect(monitor.apps.first?.isRunning == false)
+        #expect(!caffeinate.isRunning)
+    }
+
+    @Test
+    func `Quitting UI stops caffeinate even when the process stays alive`() {
+        let application = makeApplication(id: "com.apple.iBooksX", name: "Books", pid: 10)
+        let workspace = FakeWorkspaceMonitor(runningApplications: [application])
+        let caffeinate = FakeCaffeinateManager()
+        let monitor = makeMonitor(workspace: workspace, caffeinate: caffeinate)
+        monitor.setEnabled(application.bundleIdentifier!, true)
+        #expect(monitor.isCaffeinateRunning)
+
+        // Books keeps its PID but becomes prohibited after quitting its UI.
+        workspace.runningApplications = [makeApplication(
+            id: "com.apple.iBooksX", name: "Books", pid: 10, activationPolicy: .prohibited
+        )]
+        workspace.requestReconciliation()
+
+        #expect(monitor.apps.first?.isRunning == false)
+        #expect(monitor.visibleApps.isEmpty)
+        #expect(!caffeinate.isRunning)
+        #expect(!monitor.isCaffeinateRunning)
+
+        // Reopening the UI may reuse the same process without a launch event.
+        workspace.runningApplications = [application]
+        workspace.requestReconciliation()
+
+        #expect(monitor.apps.first?.isRunning == true)
+        #expect(caffeinate.isRunning)
+        #expect(monitor.isCaffeinateRunning)
+    }
+
+    @Test
+    func `Timer detects policy changes without workspace events`() async throws {
+        let application = makeApplication(id: "com.apple.iBooksX", name: "Books", pid: 10)
+        let workspace = FakeWorkspaceMonitor(runningApplications: [application])
+        let caffeinate = FakeCaffeinateManager()
+        let monitor = makeMonitor(
+            workspace: workspace, caffeinate: caffeinate, reconciliationInterval: 0.02
+        )
+        monitor.setEnabled("com.apple.iBooksX", true)
+        workspace.runningApplications = [makeApplication(
+            id: "com.apple.iBooksX", name: "Books", pid: 10, activationPolicy: .prohibited
+        )]
+
+        for _ in 0..<100 where monitor.isCaffeinateRunning {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(!monitor.isCaffeinateRunning)
+        #expect(monitor.apps.first?.isRunning == false)
+
+        workspace.runningApplications = [application]
+        for _ in 0..<100 where !monitor.isCaffeinateRunning {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(monitor.isCaffeinateRunning)
+        #expect(monitor.apps.first?.isRunning == true)
+    }
+
+    @Test
     func `Excluding an app moves it out of the menu immediately`() {
         let workspace = FakeWorkspaceMonitor(runningApplications: [
             makeApplication(id: "com.example.editor", name: "Editor", pid: 10)
@@ -120,7 +224,8 @@ struct AppMonitorTests {
 
     private func makeMonitor(
         workspace: FakeWorkspaceMonitor,
-        caffeinate: FakeCaffeinateManager
+        caffeinate: FakeCaffeinateManager,
+        reconciliationInterval: TimeInterval = 0
     ) -> AppMonitor {
         let suiteName = "AppMonitorTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -130,7 +235,7 @@ struct AppMonitorTests {
             workspaceMonitor: workspace,
             caffeinateManager: caffeinate,
             defaults: defaults,
-            reconciliationInterval: 0
+            reconciliationInterval: reconciliationInterval
         )
     }
 
@@ -178,10 +283,14 @@ private final class FakeWorkspaceMonitor: WorkspaceMonitoring {
     }
 
     func sendLaunch(_ application: WorkspaceApplication) {
+        storedRunningApplications.append(application)
         handlers?.didLaunch(application)
     }
 
     func sendTermination(_ application: WorkspaceApplication) {
+        storedRunningApplications.removeAll {
+            $0.processIdentifier == application.processIdentifier
+        }
         handlers?.didTerminate(application)
     }
 

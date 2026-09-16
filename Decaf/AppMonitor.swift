@@ -55,7 +55,7 @@ final class AppMonitor {
             workspaceMonitor: SystemWorkspaceMonitor(),
             caffeinateManager: CaffeinateManager(),
             defaults: .standard,
-            reconciliationInterval: 300
+            reconciliationInterval: 0.5
         )
     }
 
@@ -98,8 +98,8 @@ final class AppMonitor {
             didLaunch: { [weak self] application in
                 self?.applicationDidLaunch(application)
             },
-            didTerminate: { [weak self] application in
-                self?.applicationDidTerminate(application)
+            didTerminate: { [weak self] _ in
+                self?.applicationDidTerminate()
             },
             needsReconciliation: { [weak self] in
                 self?.reconcile()
@@ -108,8 +108,9 @@ final class AppMonitor {
         reconcile()
 
         if reconciliationInterval > 0 {
-            let timer = Timer.scheduledTimer(
-                withTimeInterval: reconciliationInterval,
+            // Policy changes (for example Books quitting its UI) have no exit event.
+            let timer = Timer(
+                timeInterval: reconciliationInterval,
                 repeats: true
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
@@ -117,6 +118,7 @@ final class AppMonitor {
                 }
             }
             timer.tolerance = min(30, reconciliationInterval * 0.1)
+            RunLoop.main.add(timer, forMode: .common)
             reconciliationTimer = timer
         }
     }
@@ -174,23 +176,11 @@ final class AppMonitor {
         publishState()
     }
 
-    private func applicationDidTerminate(_ application: WorkspaceApplication) {
-        if let bundleID = application.bundleIdentifier {
-            runningProcessIDs[bundleID]?.remove(application.processIdentifier)
-            if runningProcessIDs[bundleID]?.isEmpty == true {
-                runningProcessIDs.removeValue(forKey: bundleID)
-            }
-        } else {
-            for bundleID in Array(runningProcessIDs.keys) {
-                runningProcessIDs[bundleID]?.remove(application.processIdentifier)
-                if runningProcessIDs[bundleID]?.isEmpty == true {
-                    runningProcessIDs.removeValue(forKey: bundleID)
-                }
-            }
-        }
-
+    private func applicationDidTerminate() {
         signposter.emitEvent("Application Terminated")
-        publishState()
+        // A terminated NSRunningApplication may no longer expose its original PID.
+        // Refresh on exit so stale process IDs cannot keep caffeinate running.
+        reconcile()
     }
 
     private func reconcile() {
@@ -208,6 +198,10 @@ final class AppMonitor {
             cacheMetadata(for: application, bundleID: bundleID)
         }
 
+        if reconciledProcessIDs == runningProcessIDs, lastRequestedCaffeinateState != nil {
+            updateCaffeinate(runningBundleIDs: Set(runningProcessIDs.keys), forceCheck: true)
+            return
+        }
         runningProcessIDs = reconciledProcessIDs
         publishState(forceCaffeinateCheck: true)
     }
